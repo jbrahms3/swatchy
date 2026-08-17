@@ -1,14 +1,15 @@
 /**
- * Local-only persistence. Everything lives on this device: the "home page" is
- * the set of posts made here. All mutations write through to AsyncStorage.
+ * Data layer backed by the Swatchy API — the source of truth is now
+ * Postgres, not this device. Every mutation round-trips to the server;
+ * likes and post creation update local state optimistically so the UI
+ * doesn't wait on the network for feedback.
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Directory, File, Paths } from 'expo-file-system';
+import { useAuth } from '@clerk/clerk-expo';
+import { Platform } from 'react-native';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
-const PROFILE_KEY = 'colorclaim/profile/v1';
-const POSTS_KEY = 'colorclaim/posts/v1';
+import { makeApi, type Api } from './api';
 
 export type Swatch = {
   id: string;
@@ -21,18 +22,15 @@ export type Post = {
   id: string;
   authorId: string;
   authorName: string;
-  /** Absent on the seeded sample posts, which render as a solid color block. */
   photoUri?: string;
-  /** Width / height, so the feed can reserve the right space before load. */
   photoAspect?: number;
-  /** Normalized (0–1) spot within the photo the color was picked from. */
   pickPoint?: { u: number; v: number };
-  /** One claim per post — the picker only ever lets you pull one color per photo. */
   swatch: Swatch;
   caption: string;
   createdAt: number;
-  likedBy: string[];
-  isSample?: boolean;
+  likeCount: number;
+  likedByMe: boolean;
+  mine: boolean;
 };
 
 export type Profile = {
@@ -45,110 +43,24 @@ export function newId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-/* ------------------------------------------------------------------ *
- * Photo persistence
- * ------------------------------------------------------------------ */
-
-/**
- * The picker hands back a URI in the cache directory, which the OS is free to
- * evict. Copy into documents so posts don't lose their photo. Falls back to the
- * original URI if the copy fails — a post with a fragile photo beats no post.
- */
-async function persistPhoto(uri: string, id: string): Promise<string> {
-  try {
-    const dir = new Directory(Paths.document, 'photos');
-    if (!dir.exists) dir.create({ intermediates: true });
-
-    const extension = uri.split('?')[0].split('.').pop();
-    const safeExtension = extension && extension.length <= 4 ? extension : 'jpg';
-
-    const dest = new File(dir, `${id}.${safeExtension}`);
-    if (dest.exists) dest.delete();
-
-    new File(uri).copy(dest);
-    return dest.uri;
-  } catch {
-    return uri;
-  }
-}
-
-async function deletePhoto(uri?: string) {
-  if (!uri) return;
-  try {
-    const file = new File(uri);
-    if (file.exists) file.delete();
-  } catch {
-    // Best effort — a stranded file is not worth surfacing to the user.
-  }
-}
-
-/* ------------------------------------------------------------------ *
- * Migration
- * ------------------------------------------------------------------ */
-
-/**
- * Posts saved before "one color per photo" carried a `swatches` array.
- * Migrate those on load — keep the first color (the one the claim would now
- * be) rather than silently dropping someone's existing posts.
- */
-function migratePost(raw: unknown): Post | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const post = raw as Record<string, unknown>;
-
-  if (post.swatch) return post as unknown as Post;
-
-  if (Array.isArray(post.swatches) && post.swatches.length > 0) {
-    const { swatches, ...rest } = post;
-    return { ...rest, swatch: swatches[0] } as unknown as Post;
+/** Attaches a filename/mime-type-appropriate part for a local photo URI. */
+async function appendPhoto(form: FormData, uri: string) {
+  if (Platform.OS === 'web') {
+    // Native URI objects (below) aren't real Blobs, which is all web's
+    // FormData/fetch accept — so on web we have to materialize one.
+    const blob = await (await fetch(uri)).blob();
+    form.append('photo', blob, 'photo.jpg');
+    return;
   }
 
-  return null;
+  const ext = /\.(\w+)$/.exec(uri.split('?')[0])?.[1]?.toLowerCase();
+  const type = ext === 'png' ? 'image/png' : 'image/jpeg';
+  // RN's fetch polyfill accepts this { uri, name, type } shape in place of a Blob.
+  form.append('photo', { uri, name: `photo.${ext ?? 'jpg'}`, type } as unknown as Blob);
 }
 
-/* ------------------------------------------------------------------ *
- * Seed data
- * ------------------------------------------------------------------ */
-
-const swatch = (name: string, hex: string, ageMinutes: number): Swatch => ({
-  id: newId(),
-  name,
-  hex,
-  createdAt: Date.now() - ageMinutes * 60_000,
-});
-
-function sampleFeed(): Post[] {
-  return [
-    {
-      id: newId(),
-      authorId: 'sample-1',
-      authorName: 'Mika',
-      swatch: swatch('Terracotta Roof', '#C4653A', 180),
-      caption: 'Alley wall, late afternoon.',
-      createdAt: Date.now() - 180 * 60_000,
-      likedBy: [],
-      isSample: true,
-    },
-    {
-      id: newId(),
-      authorId: 'sample-2',
-      authorName: 'Devan',
-      swatch: swatch('Pool Tile', '#2E9CB8', 620),
-      caption: 'This exact blue, off the deep end of the pool.',
-      createdAt: Date.now() - 620 * 60_000,
-      likedBy: [],
-      isSample: true,
-    },
-    {
-      id: newId(),
-      authorId: 'sample-3',
-      authorName: 'Rosa',
-      swatch: swatch('Overripe Plum', '#5C2A4E', 1500),
-      caption: 'Market haul, the one plum that went too far.',
-      createdAt: Date.now() - 1500 * 60_000,
-      likedBy: [],
-      isSample: true,
-    },
-  ];
+function withAbsolutePhoto(post: Post, api: Api): Post {
+  return post.photoUri ? { ...post, photoUri: api.resolve(post.photoUri) } : post;
 }
 
 /* ------------------------------------------------------------------ *
@@ -157,162 +69,171 @@ function sampleFeed(): Post[] {
 
 export type Store = {
   ready: boolean;
+  signedIn: boolean;
   profile: Profile;
   posts: Post[];
   myPosts: Post[];
-  hasSamples: boolean;
 
-  renameProfile(name: string): void;
-  saveSwatch(swatch: Swatch): void;
-  removeSaved(id: string): void;
-  renameSaved(id: string, name: string): void;
+  renameProfile(name: string): Promise<void>;
+  saveSwatch(swatch: Pick<Swatch, 'name' | 'hex'>): Promise<void>;
+  removeSaved(id: string): Promise<void>;
+  renameSaved(id: string, name: string): Promise<void>;
   publish(input: {
     photoUri?: string;
     photoAspect?: number;
     pickPoint?: { u: number; v: number };
-    swatch: Swatch;
+    swatch: Pick<Swatch, 'name' | 'hex'>;
     caption: string;
   }): Promise<void>;
-  toggleLike(postId: string): void;
-  deletePost(postId: string): void;
-  removeSamples(): void;
+  toggleLike(postId: string): Promise<void>;
+  deletePost(postId: string): Promise<void>;
+  refresh(): Promise<void>;
 };
 
 export function useStoreState(): Store {
+  const { isSignedIn, getToken, userId } = useAuth();
+  const api = useMemo(() => makeApi(() => getToken()), [getToken]);
+
   const [ready, setReady] = useState(false);
   const [profile, setProfile] = useState<Profile>({ id: '', name: 'You', saved: [] });
   const [posts, setPosts] = useState<Post[]>([]);
 
+  const load = useCallback(async () => {
+    const [me, feed] = await Promise.all([
+      api.get<Profile>('/me'),
+      api.get<Post[]>('/posts'),
+    ]);
+    setProfile(me);
+    setPosts(feed.map((p) => withAbsolutePhoto(p, api)));
+  }, [api]);
+
   useEffect(() => {
     let cancelled = false;
 
-    (async () => {
-      try {
-        const [rawProfile, rawPosts] = await AsyncStorage.multiGet([PROFILE_KEY, POSTS_KEY]);
-        if (cancelled) return;
+    if (!isSignedIn) {
+      setReady(true); // nothing to load while signed out
+      return;
+    }
 
-        const storedProfile: Profile | null = rawProfile[1] ? JSON.parse(rawProfile[1]) : null;
-        setProfile(storedProfile ?? { id: newId(), name: 'You', saved: [] });
-
-        // First launch seeds a few posts so the feed demonstrates itself.
-        if (rawPosts[1]) {
-          const parsed: unknown[] = JSON.parse(rawPosts[1]);
-          setPosts(parsed.map(migratePost).filter((p): p is Post => p !== null));
-        } else {
-          setPosts(sampleFeed());
-        }
-      } catch {
-        setProfile({ id: newId(), name: 'You', saved: [] });
-        setPosts(sampleFeed());
-      } finally {
+    setReady(false);
+    load()
+      .catch((err) => console.error('[store] Failed to load', err))
+      .finally(() => {
         if (!cancelled) setReady(true);
-      }
-    })();
+      });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+    // Re-run on sign-in/out (userId flips between null and a real id).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSignedIn, userId]);
 
-  // Persist after hydration. Guarding on `ready` avoids clobbering stored data
-  // with the empty initial state.
-  useEffect(() => {
-    if (ready) AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile)).catch(() => {});
-  }, [ready, profile]);
+  const renameProfile = useCallback(
+    async (name: string) => {
+      const trimmed = name.trim() || 'You';
+      const updated = await api.patch<{ id: string; name: string }>('/me', { name: trimmed });
+      setProfile((p) => ({ ...p, name: updated.name }));
+      setPosts((all) => all.map((p) => (p.mine ? { ...p, authorName: updated.name } : p)));
+    },
+    [api]
+  );
 
-  useEffect(() => {
-    if (ready) AsyncStorage.setItem(POSTS_KEY, JSON.stringify(posts)).catch(() => {});
-  }, [ready, posts]);
+  const saveSwatch = useCallback(
+    async (swatch: Pick<Swatch, 'name' | 'hex'>) => {
+      const saved = await api.post<Swatch>('/swatches', swatch);
+      setProfile((p) => ({
+        ...p,
+        saved: [saved, ...p.saved.filter((s) => s.hex !== saved.hex)],
+      }));
+    },
+    [api]
+  );
 
-  const renameProfile = useCallback((name: string) => {
-    const trimmed = name.trim() || 'You';
-    setProfile((p) => ({ ...p, name: trimmed }));
-    setPosts((all) => all.map((p) => (p.isSample ? p : { ...p, authorName: trimmed })));
-  }, []);
+  const removeSaved = useCallback(
+    async (id: string) => {
+      await api.del(`/swatches/${id}`);
+      setProfile((p) => ({ ...p, saved: p.saved.filter((s) => s.id !== id) }));
+    },
+    [api]
+  );
 
-  const saveSwatch = useCallback((swatch: Swatch) => {
-    setProfile((p) => ({
-      // Same color saved twice is almost always a re-pick, so keep the newest.
-      ...p,
-      saved: [swatch, ...p.saved.filter((s) => s.hex !== swatch.hex)],
-    }));
-  }, []);
-
-  const removeSaved = useCallback((id: string) => {
-    setProfile((p) => ({ ...p, saved: p.saved.filter((s) => s.id !== id) }));
-  }, []);
-
-  const renameSaved = useCallback((id: string, name: string) => {
-    setProfile((p) => ({
-      ...p,
-      saved: p.saved.map((s) => (s.id === id ? { ...s, name: name.trim() || s.name } : s)),
-    }));
-  }, []);
+  const renameSaved = useCallback(
+    async (id: string, name: string) => {
+      const updated = await api.patch<Swatch>(`/swatches/${id}`, { name });
+      setProfile((p) => ({ ...p, saved: p.saved.map((s) => (s.id === id ? updated : s)) }));
+    },
+    [api]
+  );
 
   const publish = useCallback<Store['publish']>(
     async ({ photoUri, photoAspect, pickPoint, swatch, caption }) => {
-      const id = newId();
-      const stored = photoUri ? await persistPhoto(photoUri, id) : undefined;
+      const form = new FormData();
+      form.append('swatchName', swatch.name);
+      form.append('swatchHex', swatch.hex);
+      form.append('caption', caption);
+      if (photoAspect) form.append('photoAspect', String(photoAspect));
+      if (pickPoint) {
+        form.append('pickU', String(pickPoint.u));
+        form.append('pickV', String(pickPoint.v));
+      }
+      if (photoUri) await appendPhoto(form, photoUri);
 
-      setPosts((all) => [
-        {
-          id,
-          authorId: profile.id,
-          authorName: profile.name,
-          photoUri: stored,
-          photoAspect,
-          pickPoint,
-          swatch,
-          caption: caption.trim(),
-          createdAt: Date.now(),
-          likedBy: [],
-        },
-        ...all,
-      ]);
+      const created = await api.post<Post>('/posts', form);
+      setPosts((all) => [withAbsolutePhoto(created, api), ...all]);
     },
-    [profile.id, profile.name]
+    [api]
   );
 
   const toggleLike = useCallback(
-    (postId: string) => {
+    async (postId: string) => {
+      const target = posts.find((p) => p.id === postId);
+      if (!target) return;
+      const wasLiked = target.likedByMe;
+
+      // Optimistic — liking should feel instant.
       setPosts((all) =>
-        all.map((p) => {
-          if (p.id !== postId) return p;
-          const liked = p.likedBy.includes(profile.id);
-          return {
-            ...p,
-            likedBy: liked ? p.likedBy.filter((u) => u !== profile.id) : [...p.likedBy, profile.id],
-          };
-        })
+        all.map((p) =>
+          p.id === postId
+            ? { ...p, likedByMe: !wasLiked, likeCount: p.likeCount + (wasLiked ? -1 : 1) }
+            : p
+        )
       );
+
+      try {
+        if (wasLiked) await api.del(`/posts/${postId}/like`);
+        else await api.post(`/posts/${postId}/like`);
+      } catch (err) {
+        console.error('[store] Failed to toggle like', err);
+        // Roll back on failure.
+        setPosts((all) =>
+          all.map((p) =>
+            p.id === postId
+              ? { ...p, likedByMe: wasLiked, likeCount: p.likeCount + (wasLiked ? 1 : -1) }
+              : p
+          )
+        );
+      }
     },
-    [profile.id]
+    [api, posts]
   );
 
-  const deletePost = useCallback((postId: string) => {
-    setPosts((all) => {
-      const target = all.find((p) => p.id === postId);
-      void deletePhoto(target?.photoUri);
-      return all.filter((p) => p.id !== postId);
-    });
-  }, []);
-
-  const removeSamples = useCallback(() => {
-    setPosts((all) => all.filter((p) => !p.isSample));
-  }, []);
-
-  const myPosts = useMemo(
-    () => posts.filter((p) => p.authorId === profile.id),
-    [posts, profile.id]
+  const deletePost = useCallback(
+    async (postId: string) => {
+      await api.del(`/posts/${postId}`);
+      setPosts((all) => all.filter((p) => p.id !== postId));
+    },
+    [api]
   );
-  const hasSamples = useMemo(() => posts.some((p) => p.isSample), [posts]);
+
+  const myPosts = useMemo(() => posts.filter((p) => p.mine), [posts]);
 
   return {
     ready,
+    signedIn: !!isSignedIn,
     profile,
     posts,
     myPosts,
-    hasSamples,
     renameProfile,
     saveSwatch,
     removeSaved,
@@ -320,7 +241,7 @@ export function useStoreState(): Store {
     publish,
     toggleLike,
     deletePost,
-    removeSamples,
+    refresh: load,
   };
 }
 

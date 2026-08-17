@@ -265,9 +265,11 @@ app.delete(
   })
 );
 
+// Deliberately not behind requireAuth(): image tags can't easily attach an
+// Authorization header, and post ids are unguessable UUIDs only ever handed
+// out via the (auth-gated) feed — same privacy bar as an unlisted link.
 app.get(
   '/posts/:id/photo',
-  requireAuth(),
   asyncRoute(async (req, res) => {
     const result = await pool.query('select photo, photo_mime from posts where id = $1', [
       req.params.id,
@@ -276,7 +278,7 @@ app.get(
     if (!row || !row.photo) return res.status(404).end();
 
     res.set('Content-Type', row.photo_mime || 'image/jpeg');
-    res.set('Cache-Control', 'private, max-age=31536000, immutable'); // photos never change after posting
+    res.set('Cache-Control', 'public, max-age=31536000, immutable'); // photos never change after posting
     res.send(row.photo);
   })
 );

@@ -12,11 +12,11 @@ import { timeAgo } from '@/lib/time';
 const PHOTO_MARKER_SIZE = 24;
 
 export function PostCard({ post }: { post: Post }) {
-  const { profile, toggleLike, deletePost } = useStore();
+  const { toggleLike, deletePost } = useStore();
   const [holding, setHolding] = useState(false);
 
-  const liked = post.likedBy.includes(profile.id);
-  const mine = post.authorId === profile.id;
+  const liked = post.likedByMe;
+  const mine = post.mine;
   // Nothing to reveal on photo-less posts or posts saved before pickPoint existed.
   const canLocate = !!(post.photoUri && post.pickPoint);
 
@@ -119,10 +119,8 @@ export function PostCard({ post }: { post: Post }) {
             size={20}
             color={liked ? '#FF4D6D' : T.textDim}
           />
-          {post.likedBy.length > 0 && (
-            <Text style={[styles.likeCount, liked && { color: '#FF4D6D' }]}>
-              {post.likedBy.length}
-            </Text>
+          {post.likeCount > 0 && (
+            <Text style={[styles.likeCount, liked && { color: '#FF4D6D' }]}>{post.likeCount}</Text>
           )}
         </Pressable>
       </View>

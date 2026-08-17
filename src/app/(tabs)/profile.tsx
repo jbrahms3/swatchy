@@ -1,3 +1,4 @@
+import { useClerk } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import {
@@ -23,8 +24,8 @@ const GUTTER = 16;
 const COLUMNS = 3;
 
 export default function ProfileScreen() {
-  const { profile, myPosts, hasSamples, renameProfile, removeSaved, renameSaved, removeSamples } =
-    useStore();
+  const { profile, myPosts, renameProfile, removeSaved, renameSaved } = useStore();
+  const { signOut } = useClerk();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
 
@@ -36,14 +37,19 @@ export default function ProfileScreen() {
   const accent = profile.saved[0]?.hex ?? T.surfaceHi;
 
   const commitName = () => {
-    renameProfile(draftName);
     setEditingName(false);
+    if (draftName.trim() && draftName.trim() !== profile.name) {
+      renameProfile(draftName).catch((err) => {
+        console.error('[profile] Failed to rename', err);
+        Alert.alert('Could not rename', 'Something went wrong. Try again.');
+      });
+    }
   };
 
-  const confirmRemoveSamples = () => {
-    Alert.alert('Remove sample posts?', 'The three seeded example posts will be deleted.', [
+  const confirmSignOut = () => {
+    Alert.alert('Sign out?', undefined, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: removeSamples },
+      { text: 'Sign out', style: 'destructive', onPress: () => signOut() },
     ]);
   };
 
@@ -117,21 +123,19 @@ export default function ProfileScreen() {
           </View>
         )}
 
-        {hasSamples && (
-          <Pressable
-            onPress={confirmRemoveSamples}
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.samples, { opacity: pressed ? 0.6 : 1 }]}>
-            <Text style={styles.samplesText}>Remove sample posts</Text>
-          </Pressable>
-        )}
+        <Pressable
+          onPress={confirmSignOut}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.signOut, { opacity: pressed ? 0.6 : 1 }]}>
+          <Text style={styles.signOutText}>Sign out</Text>
+        </Pressable>
       </ScrollView>
 
       <SwatchEditor
         swatch={editing}
         onClose={() => setEditing(null)}
-        onSave={(name) => editing && renameSaved(editing.id, name)}
-        onDelete={() => editing && removeSaved(editing.id)}
+        onSave={(name) => editing && renameSaved(editing.id, name).catch(() => {})}
+        onDelete={() => editing && removeSaved(editing.id).catch(() => {})}
       />
     </>
   );
@@ -196,6 +200,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     paddingHorizontal: GUTTER,
   },
-  samples: { alignSelf: 'center', marginTop: 32, padding: 12 },
-  samplesText: { color: T.danger, fontSize: 14, fontWeight: '600' },
+  signOut: { alignSelf: 'center', marginTop: 32, padding: 12 },
+  signOutText: { color: T.danger, fontSize: 14, fontWeight: '600' },
 });

@@ -189,11 +189,16 @@ export default function PickScreen() {
     setArea({ width, height });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!swatch) return;
-    saveSwatch(swatch);
-    setSaved(true);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    try {
+      await saveSwatch(swatch);
+      setSaved(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    } catch (err) {
+      console.error('[pick] Failed to save swatch', err);
+      Alert.alert('Could not save', 'Something went wrong. Try again.');
+    }
   };
 
   const handlePost = async () => {

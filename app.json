@@ -40,7 +40,8 @@
           "cameraPermission": "ColorClaim uses the camera so you can claim colors from a photo you take."
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true
