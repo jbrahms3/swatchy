@@ -1,0 +1,20 @@
+{
+  "name": "swatchy-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20.19.4"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "migrate": "node migrate.js"
+  },
+  "dependencies": {
+    "@clerk/express": "^1.4.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "multer": "^2.0.0",
+    "pg": "^8.13.1"
+  }
+}
