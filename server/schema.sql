@@ -1,11 +1,9 @@
 -- Swatchy API schema.
 --
--- Photos are stored as bytea directly in Postgres rather than in separate
--- object storage. That's a deliberate tradeoff for this app's scale: photos
--- are already downscaled to a ~700px long edge before upload (same copy used
--- for color sampling on-device), so rows stay small (tens to low hundreds of
--- KB). Moving to S3/R2 later is a clean, isolated change if the app outgrows
--- this — nothing else in the schema depends on where the bytes live.
+-- Photos live in a Railway Bucket (S3-compatible object storage), not in this
+-- database — `posts.photo_key` is just the object key. /posts/:id/photo
+-- redirects to a short-lived presigned URL rather than streaming bytes
+-- through the API, so photo traffic never touches this service's egress.
 
 create extension if not exists "pgcrypto";
 
@@ -19,8 +17,7 @@ create table if not exists users (
 create table if not exists posts (
   id uuid primary key default gen_random_uuid(),
   author_id uuid not null references users(id) on delete cascade,
-  photo bytea,
-  photo_mime text,
+  photo_key text,
   photo_aspect real,
   pick_u real,
   pick_v real,
@@ -29,6 +26,12 @@ create table if not exists posts (
   caption text not null default '',
   created_at timestamptz not null default now()
 );
+
+-- Migrates any table created before the move to bucket storage. No-ops
+-- (IF EXISTS / IF NOT EXISTS) once already applied.
+alter table posts drop column if exists photo;
+alter table posts drop column if exists photo_mime;
+alter table posts add column if not exists photo_key text;
 
 create index if not exists posts_created_at_idx on posts (created_at desc);
 create index if not exists posts_author_id_idx on posts (author_id);

@@ -11,6 +11,8 @@
     "migrate": "node migrate.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.686.0",
+    "@aws-sdk/s3-request-presigner": "^3.686.0",
     "@clerk/express": "^1.4.0",
     "cors": "^2.8.5",
     "express": "^4.21.2",

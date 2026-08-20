@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 /**
- * Swatchy API. Everything behind Clerk auth except /health. Photos are
- * stored as bytea in Postgres (see schema.sql for why) and streamed back
- * through /posts/:id/photo rather than embedded in the JSON feed payload.
+ * Swatchy API. Everything behind Clerk auth except /health. Photos live in a
+ * Railway Bucket (S3-compatible) — the DB only holds the object key, and
+ * /posts/:id/photo redirects to a short-lived presigned URL rather than
+ * streaming bytes through this service.
  */
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
+const crypto = require('node:crypto');
 const { Pool } = require('pg');
 const { clerkMiddleware, requireAuth, getAuth, clerkClient } = require('@clerk/express');
+const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const app = express();
 const port = process.env.PORT || 4000;
@@ -17,6 +21,16 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL?.includes('railway') ? { rejectUnauthorized: false } : undefined,
 });
+
+const s3 = new S3Client({
+  region: process.env.S3_REGION,
+  endpoint: process.env.S3_ENDPOINT,
+  credentials: {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID,
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+  },
+});
+const S3_BUCKET = process.env.S3_BUCKET;
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -63,7 +77,7 @@ function postRow(row, viewerId) {
     id: row.id,
     authorId: row.author_id,
     authorName: row.author_name,
-    photoUri: row.photo === null ? undefined : `/posts/${row.id}/photo`,
+    photoUri: row.photo_key ? `/posts/${row.id}/photo` : undefined,
     photoAspect: row.photo_aspect ?? undefined,
     pickPoint: row.pick_u === null ? undefined : { u: row.pick_u, v: row.pick_v },
     swatch: {
@@ -170,7 +184,7 @@ app.delete(
 
 const FEED_QUERY = `
   select
-    p.id, p.author_id, u.name as author_name, p.photo, p.photo_aspect,
+    p.id, p.author_id, u.name as author_name, p.photo_key, p.photo_aspect,
     p.pick_u, p.pick_v, p.swatch_name, p.swatch_hex, p.caption, p.created_at,
     coalesce(l.like_count, 0) as like_count,
     exists(select 1 from likes where post_id = p.id and user_id = $1) as liked_by_me
@@ -210,22 +224,28 @@ app.post(
       return res.status(400).json({ error: 'swatchName and a valid swatchHex are required' });
     }
 
+    const id = crypto.randomUUID();
+    let photoKey = null;
+
+    if (req.file) {
+      const ext = req.file.mimetype === 'image/png' ? 'png' : 'jpg';
+      photoKey = `photos/${id}.${ext}`;
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: S3_BUCKET,
+          Key: photoKey,
+          Body: req.file.buffer,
+          ContentType: req.file.mimetype,
+        })
+      );
+    }
+
     const inserted = await pool.query(
       `insert into posts
-        (author_id, photo, photo_mime, photo_aspect, pick_u, pick_v, swatch_name, swatch_hex, caption)
+        (id, author_id, photo_key, photo_aspect, pick_u, pick_v, swatch_name, swatch_hex, caption)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        returning id, created_at`,
-      [
-        user.id,
-        req.file ? req.file.buffer : null,
-        req.file ? req.file.mimetype : null,
-        photoAspect,
-        pickU,
-        pickV,
-        swatchName,
-        swatchHex,
-        caption,
-      ]
+      [id, user.id, photoKey, photoAspect, pickU, pickV, swatchName, swatchHex, caption]
     );
 
     res.status(201).json(
@@ -234,7 +254,7 @@ app.post(
           id: inserted.rows[0].id,
           author_id: user.id,
           author_name: user.name,
-          photo: req.file ? true : null,
+          photo_key: photoKey,
           photo_aspect: photoAspect,
           pick_u: pickU,
           pick_v: pickV,
@@ -257,10 +277,18 @@ app.delete(
   asyncRoute(async (req, res) => {
     const user = await ensureUser(getAuth(req).userId);
     const result = await pool.query(
-      'delete from posts where id = $1 and author_id = $2 returning id',
+      'delete from posts where id = $1 and author_id = $2 returning photo_key',
       [req.params.id, user.id]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'not found' });
+
+    const photoKey = result.rows[0].photo_key;
+    if (photoKey) {
+      // Best effort — an orphaned bucket object isn't worth failing the delete over.
+      s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: photoKey })).catch((err) =>
+        console.error('[posts] Failed to delete photo from bucket', photoKey, err)
+      );
+    }
     res.status(204).end();
   })
 );
@@ -268,18 +296,24 @@ app.delete(
 // Deliberately not behind requireAuth(): image tags can't easily attach an
 // Authorization header, and post ids are unguessable UUIDs only ever handed
 // out via the (auth-gated) feed — same privacy bar as an unlisted link.
+const PHOTO_URL_TTL_SECONDS = 6 * 60 * 60; // 6h — long enough to cut repeat hits, short enough to rotate
+
 app.get(
   '/posts/:id/photo',
   asyncRoute(async (req, res) => {
-    const result = await pool.query('select photo, photo_mime from posts where id = $1', [
-      req.params.id,
-    ]);
-    const row = result.rows[0];
-    if (!row || !row.photo) return res.status(404).end();
+    const result = await pool.query('select photo_key from posts where id = $1', [req.params.id]);
+    const photoKey = result.rows[0]?.photo_key;
+    if (!photoKey) return res.status(404).end();
 
-    res.set('Content-Type', row.photo_mime || 'image/jpeg');
-    res.set('Cache-Control', 'public, max-age=31536000, immutable'); // photos never change after posting
-    res.send(row.photo);
+    const url = await getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket: S3_BUCKET, Key: photoKey }),
+      { expiresIn: PHOTO_URL_TTL_SECONDS }
+    );
+    // Cache the redirect itself so repeat loads skip this server entirely
+    // until the presigned URL is due to expire.
+    res.set('Cache-Control', `public, max-age=${PHOTO_URL_TTL_SECONDS}`);
+    res.redirect(302, url);
   })
 );
 
