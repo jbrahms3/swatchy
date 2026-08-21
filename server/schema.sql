@@ -76,3 +76,11 @@ create table if not exists weekly_entries (
 );
 
 create index if not exists weekly_entries_user_week_idx on weekly_entries (user_id, week_key);
+
+-- Marketing waitlist, collected from the public landing page (GET /). Not
+-- tied to a `users` row — most signups happen before someone has an account.
+create table if not exists waitlist_signups (
+  id uuid primary key default gen_random_uuid(),
+  email text not null unique,
+  created_at timestamptz not null default now()
+);

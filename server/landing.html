@@ -1,0 +1,625 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swatchy — pull colors out of photos, name them, share them.</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23C97A3D'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23FBFAF3'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,340..900;1,9..144,340..900&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --paper: #EFF1E9;
+    --paper-alt: #E4E6DC;
+    --ink: #1C1E17;
+    --ink-dim: #64675A;
+    --ink-faint: #8B8E7E;
+    --line: rgba(28, 30, 23, 0.14);
+    --line-strong: rgba(28, 30, 23, 0.24);
+
+    /* The chip's own "paper" -- fixed white/off-white regardless of site
+       theme, same reasoning as the app's real photo-detail card: a swatch
+       reads the same whether the room is bright or dark. */
+    --card-paper: #FBFAF3;
+    --card-ink: #1A1B15;
+    --card-ink-dim: #6C6E60;
+
+    --s-coral: #E2574C;
+    --s-gold: #E8B04B;
+    --s-forest: #3F8F6F;
+    --s-cobalt: #2F6DB0;
+    --s-violet: #8A5FBF;
+    --s-clay: #C97A3D;
+
+    --shadow-chip: 0 20px 44px -22px rgba(20, 22, 15, 0.45);
+    --shadow-soft: 0 10px 30px -18px rgba(20, 22, 15, 0.3);
+    --radius-chip: 16px;
+    --radius-sm: 8px;
+
+    --font-display: 'Fraunces', 'Iowan Old Style', Georgia, serif;
+    --font-body: 'Work Sans', 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #16170F;
+      --paper-alt: #1D1F14;
+      --ink: #F0F0E6;
+      --ink-dim: #9EA08F;
+      --ink-faint: #6E7062;
+      --line: rgba(240, 240, 230, 0.14);
+      --line-strong: rgba(240, 240, 230, 0.24);
+      --shadow-chip: 0 20px 44px -20px rgba(0, 0, 0, 0.65);
+      --shadow-soft: 0 10px 30px -18px rgba(0, 0, 0, 0.55);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3 { font-family: var(--font-display); font-weight: 600; margin: 0; text-wrap: balance; color: var(--ink); }
+  p { margin: 0; }
+  a { color: inherit; }
+  a:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--s-cobalt); outline-offset: 3px; border-radius: 3px; }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding-inline: clamp(20px, 5vw, 48px); }
+  .prose { max-width: 62ch; }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  /* -------------------------------------------------- palette strip -- */
+  .palette-strip { display: flex; height: 6px; width: 100%; }
+  .palette-strip span { flex: 1; }
+
+  /* -------------------------------------------------------- header -- */
+  header.site {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-block: 22px;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .wordmark {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 600;
+    font-size: 22px;
+    letter-spacing: -0.01em;
+    text-decoration: none;
+  }
+  .wordmark .dot { color: var(--s-clay); font-style: normal; }
+  nav.site-nav { display: flex; gap: clamp(14px, 3vw, 28px); }
+  nav.site-nav a {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-decoration: none;
+    color: var(--ink-dim);
+    border-bottom: 1px solid transparent;
+    padding-bottom: 3px;
+    transition: color 0.18s ease, border-color 0.18s ease;
+  }
+  nav.site-nav a:hover { color: var(--ink); border-color: var(--line-strong); }
+
+  /* ---------------------------------------------------------- hero -- */
+  section.hero { padding-block: clamp(28px, 6vw, 64px) clamp(48px, 8vw, 88px); }
+  .hero-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: clamp(32px, 6vw, 64px);
+    align-items: center;
+  }
+  @media (max-width: 860px) {
+    .hero-grid { grid-template-columns: 1fr; }
+  }
+
+  .hero-copy .eyebrow { margin-bottom: 18px; }
+  .hero-copy h1 {
+    font-size: clamp(38px, 5.6vw, 62px);
+    line-height: 1.04;
+    letter-spacing: -0.015em;
+  }
+  .hero-copy h1 em { font-style: italic; font-weight: 500; color: var(--ink-dim); }
+  .hero-copy p.lede {
+    font-size: clamp(16px, 1.6vw, 18.5px);
+    color: var(--ink-dim);
+    margin-top: 22px;
+    max-width: 46ch;
+  }
+  .hero-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 30px;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    letter-spacing: 0.03em;
+  }
+  .hero-meta .sep { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-faint); flex: none; }
+
+  /* ---------------------------------------------------- chip visual -- */
+  .chip-fan {
+    position: relative;
+    height: clamp(320px, 34vw, 440px);
+    width: 100%;
+  }
+  .chip-mini {
+    position: absolute;
+    width: clamp(96px, 13vw, 138px);
+    aspect-ratio: 5 / 7;
+    border-radius: var(--radius-chip);
+    box-shadow: var(--shadow-soft);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+  }
+  .chip-mini:hover { transform: translateY(-6px) rotate(var(--rot, 0deg)) !important; box-shadow: var(--shadow-chip); }
+  .chip-mini .hole {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--paper);
+    align-self: flex-start;
+  }
+  .chip-mini .code {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+  }
+
+  .chip-featured {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: min(280px, 62%);
+    transform: translate(-50%, -50%) rotate(-3deg);
+    border-radius: var(--radius-chip);
+    overflow: hidden;
+    box-shadow: var(--shadow-chip);
+    background: var(--card-paper);
+    transition: transform 0.3s ease;
+  }
+  .chip-featured:hover { transform: translate(-50%, -50%) rotate(0deg); }
+  .chip-featured .art { position: relative; background: var(--s-clay); padding: 16px 16px 0; }
+  .chip-featured .art .hole {
+    position: absolute; top: 12px; left: 16px;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--s-clay);
+    box-shadow: inset 0 0 0 3px var(--card-paper);
+  }
+  .chip-featured .art svg { display: block; width: 100%; height: auto; border-radius: 6px 6px 0 0; }
+  .chip-featured .info { padding: 14px 16px 18px; }
+  .chip-featured .info .name { font-family: var(--font-display); font-weight: 600; font-size: 17px; color: var(--card-ink); }
+  .chip-featured .info .hex {
+    font-family: var(--font-mono); font-size: 13px; color: var(--card-ink-dim);
+    margin-top: 3px; letter-spacing: 0.02em;
+  }
+  .chip-featured .info .rgb {
+    font-family: var(--font-mono); font-size: 11.5px; color: var(--card-ink-dim);
+    margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(28,30,23,0.1);
+    letter-spacing: 0.01em;
+  }
+
+  /* ------------------------------------------------------- sections -- */
+  section.band { padding-block: clamp(56px, 9vw, 100px); }
+  section.band.alt { background: var(--paper-alt); }
+  .section-head { max-width: 56ch; margin-bottom: clamp(36px, 5vw, 56px); }
+  .section-head .eyebrow { margin-bottom: 14px; }
+  .section-head h2 { font-size: clamp(28px, 3.4vw, 38px); letter-spacing: -0.01em; }
+  .section-head p { color: var(--ink-dim); margin-top: 14px; font-size: 16px; max-width: 52ch; }
+
+  .reveal { opacity: 1; }
+  @media (prefers-reduced-motion: no-preference) {
+    .reveal { opacity: 0; transform: translateY(16px); transition: opacity 0.7s ease, transform 0.7s ease; }
+    .reveal.is-visible { opacity: 1; transform: none; }
+  }
+
+  /* ------------------------------------------------------- steps ---- */
+  .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(20px, 3vw, 32px); }
+  @media (max-width: 760px) { .steps { grid-template-columns: 1fr; } }
+  .step { border-top: 1px solid var(--line-strong); padding-top: 20px; }
+  .step .num {
+    font-family: var(--font-display); font-style: italic; font-weight: 500;
+    font-size: 15px; color: var(--ink-faint); display: block; margin-bottom: 14px;
+  }
+  .step h3 { font-size: 19px; font-weight: 600; letter-spacing: -0.005em; }
+  .step p { color: var(--ink-dim); margin-top: 8px; font-size: 15px; line-height: 1.55; }
+
+  /* --------------------------------------------------- feed section - */
+  .feed-layout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); gap: clamp(28px, 5vw, 56px); align-items: center; }
+  @media (max-width: 860px) { .feed-layout { grid-template-columns: 1fr; } }
+  .feed-layout .prose p + p { margin-top: 12px; }
+  .feed-layout .prose { color: var(--ink-dim); font-size: 16px; }
+
+  .mini-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .mini-grid .tile {
+    aspect-ratio: 1; border-radius: 12px; box-shadow: var(--shadow-soft);
+    display: flex; align-items: flex-end; padding: 10px;
+  }
+  .mini-grid .tile span {
+    font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.02em;
+  }
+
+  /* ------------------------------------------------------- weekly --- */
+  .weekly-layout { display: grid; grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr); gap: clamp(28px, 5vw, 56px); align-items: center; }
+  @media (max-width: 860px) { .weekly-layout { grid-template-columns: 1fr; } }
+  .weekly-layout .prose { color: var(--ink-dim); font-size: 16px; }
+  .weekly-layout .prose p + p { margin-top: 12px; }
+
+  .match-card {
+    background: var(--card-paper);
+    border-radius: var(--radius-chip);
+    box-shadow: var(--shadow-chip);
+    padding: clamp(20px, 3vw, 30px);
+  }
+  .match-row { display: flex; align-items: center; justify-content: center; gap: clamp(14px, 3vw, 26px); }
+  .match-item { text-align: center; }
+  .match-swatch { width: 84px; height: 84px; border-radius: 12px; margin-inline: auto; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08); }
+  .match-item .label { font-family: var(--font-mono); font-size: 11px; color: var(--card-ink-dim); margin-top: 10px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .match-arrow { font-family: var(--font-display); font-style: italic; font-size: 22px; color: var(--card-ink-dim); }
+  .match-score {
+    margin-top: 22px; padding-top: 18px; border-top: 1px solid rgba(28,30,23,0.1);
+    text-align: center; font-family: var(--font-mono); color: var(--card-ink);
+  }
+  .match-score .diffs { font-size: 14px; letter-spacing: 0.02em; }
+  .match-score .diffs b { font-weight: 600; }
+  .match-score .total { font-size: 12px; color: var(--card-ink-dim); margin-top: 6px; }
+
+  /* ------------------------------------------------------ waitlist -- */
+  .waitlist-card {
+    background: var(--card-paper);
+    border-radius: var(--radius-chip);
+    box-shadow: var(--shadow-chip);
+    padding: clamp(28px, 5vw, 48px);
+    max-width: 620px;
+    margin-inline: auto;
+    text-align: center;
+  }
+  .waitlist-card .eyebrow { color: var(--card-ink-dim); }
+  .waitlist-card h2 { color: var(--card-ink); font-size: clamp(26px, 3vw, 34px); margin-top: 14px; }
+  .waitlist-card .sub { color: var(--card-ink-dim); font-size: 15px; margin-top: 12px; max-width: 44ch; margin-inline: auto; }
+  .waitlist-form { display: flex; gap: 10px; margin-top: 26px; flex-wrap: wrap; justify-content: center; }
+  .waitlist-form input[type="email"] {
+    flex: 1 1 240px;
+    min-width: 0;
+    height: 48px;
+    border-radius: 10px;
+    border: 1px solid rgba(28, 30, 23, 0.18);
+    background: #FFFFFF;
+    padding: 0 16px;
+    font-family: var(--font-body);
+    font-size: 15px;
+    color: var(--card-ink);
+  }
+  .waitlist-form input[type="email"]::placeholder { color: var(--card-ink-dim); }
+  .waitlist-form button {
+    height: 48px;
+    padding: 0 22px;
+    border-radius: 10px;
+    border: none;
+    background: var(--card-ink);
+    color: var(--card-paper);
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 15px;
+    cursor: pointer;
+    transition: opacity 0.18s ease;
+  }
+  .waitlist-form button:hover { opacity: 0.85; }
+  .waitlist-form button:disabled { opacity: 0.5; cursor: default; }
+  .waitlist-status { min-height: 18px; margin-top: 14px; font-family: var(--font-mono); font-size: 12.5px; letter-spacing: 0.02em; }
+  .waitlist-status[data-state="ok"] { color: var(--s-forest); }
+  .waitlist-status[data-state="error"] { color: var(--s-coral); }
+
+  /* -------------------------------------------------------- footer -- */
+  footer.site { padding-block: clamp(40px, 6vw, 64px) 0; }
+  .footer-inner {
+    display: flex; align-items: center; justify-content: space-between; gap: 20px;
+    padding-bottom: clamp(28px, 4vw, 40px); flex-wrap: wrap;
+  }
+  footer.site .wordmark { font-size: 18px; }
+  footer.site .tagline { font-size: 14px; color: var(--ink-dim); max-width: 32ch; }
+  .stack-note {
+    font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-faint);
+    letter-spacing: 0.06em; text-transform: uppercase; text-align: right;
+  }
+  .copyright { font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); padding-block: 18px; text-align: center; }
+</style>
+</head>
+<body>
+
+<div class="palette-strip" aria-hidden="true">
+  <span style="background:var(--s-coral)"></span>
+  <span style="background:var(--s-gold)"></span>
+  <span style="background:var(--s-forest)"></span>
+  <span style="background:var(--s-cobalt)"></span>
+  <span style="background:var(--s-violet)"></span>
+  <span style="background:var(--s-clay)"></span>
+</div>
+
+<div class="wrap">
+  <header class="site">
+    <a class="wordmark" href="#">Swatchy<span class="dot">.</span></a>
+    <nav class="site-nav">
+      <a href="#how-it-works">How it works</a>
+      <a href="#weekly">Weekly palette</a>
+      <a href="#feed">The feed</a>
+      <a href="#waitlist">Waitlist</a>
+    </nav>
+  </header>
+</div>
+
+<section class="hero">
+  <div class="wrap">
+    <div class="hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow">A color-claiming app</p>
+        <h1>Pull colors out<br>of photos. <em>Name<br>them. Share them.</em></h1>
+        <p class="lede">
+          Point your camera at anything &mdash; a mug, a wall, a sunset over a parking lot &mdash;
+          press down, and Swatchy lifts the exact color out from under your fingertip.
+          No color wheel, no guessing. Just what's actually there.
+        </p>
+        <div class="hero-meta">
+          <span>iOS &amp; Android</span>
+          <span class="sep"></span>
+          <span>Built with Expo</span>
+          <span class="sep"></span>
+          <span>Free to claim</span>
+        </div>
+      </div>
+
+      <div class="chip-fan" aria-hidden="true">
+        <div class="chip-mini" style="background:var(--s-cobalt); left:2%; top:6%; --rot:-11deg; transform:rotate(-11deg);">
+          <div class="hole"></div>
+          <span class="code" style="color:#EAF1FA">#2F6DB0</span>
+        </div>
+        <div class="chip-mini" style="background:var(--s-gold); left:16%; top:44%; --rot:-4deg; transform:rotate(-4deg);">
+          <div class="hole"></div>
+          <span class="code" style="color:#3B2A08">#E8B04B</span>
+        </div>
+        <div class="chip-mini" style="background:var(--s-forest); right:14%; top:2%; --rot:9deg; transform:rotate(9deg);">
+          <div class="hole"></div>
+          <span class="code" style="color:#EAF5EF">#3F8F6F</span>
+        </div>
+        <div class="chip-mini" style="background:var(--s-violet); right:0%; top:40%; --rot:14deg; transform:rotate(14deg);">
+          <div class="hole"></div>
+          <span class="code" style="color:#F4EFFA">#8A5FBF</span>
+        </div>
+        <div class="chip-mini" style="background:var(--s-coral); left:6%; bottom:0%; --rot:6deg; transform:rotate(6deg);">
+          <div class="hole"></div>
+          <span class="code" style="color:#FCEBE9">#E2574C</span>
+        </div>
+
+        <div class="chip-featured">
+          <div class="art">
+            <div class="hole"></div>
+            <svg viewBox="0 0 220 150" role="presentation">
+              <rect width="220" height="150" fill="#EDE6D6"/>
+              <rect x="0" y="112" width="220" height="38" fill="#DCD3BC"/>
+              <path d="M66 112 L154 112 L141 58 L79 58 Z" fill="#C97A3D"/>
+              <rect x="61" y="49" width="98" height="15" rx="3" fill="#B0602F"/>
+              <ellipse cx="88" cy="42" rx="10" ry="24" fill="#357A5E" transform="rotate(-16 88 42)"/>
+              <ellipse cx="112" cy="34" rx="12" ry="28" fill="#4FA07E"/>
+              <ellipse cx="136" cy="42" rx="10" ry="24" fill="#2E6B50" transform="rotate(16 136 42)"/>
+            </svg>
+          </div>
+          <div class="info">
+            <p class="name">Terracotta Pot</p>
+            <p class="hex">#C97A3D</p>
+            <p class="rgb">R 201&nbsp;&nbsp;&middot;&nbsp;&nbsp;G 122&nbsp;&nbsp;&middot;&nbsp;&nbsp;B 61</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="how-it-works">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow">How it works</p>
+      <h2>Three steps, one honest color</h2>
+      <p>No mixing sliders, no eyeballing a color wheel &mdash; Swatchy reads the pixel your finger is actually on.</p>
+    </div>
+
+    <div class="steps">
+      <div class="step reveal">
+        <span class="num">01</span>
+        <h3>Snap or choose a photo</h3>
+        <p>Take a picture, or pick one from your library &mdash; whatever has the color you're after.</p>
+      </div>
+      <div class="step reveal">
+        <span class="num">02</span>
+        <h3>Press to pull the color</h3>
+        <p>Press and drag anywhere on the photo. A loupe zooms in as you go; lift your finger to claim that exact spot.</p>
+      </div>
+      <div class="step reveal">
+        <span class="num">03</span>
+        <h3>Name it, save it, share it</h3>
+        <p>Swatchy suggests a name from the nearest known color &mdash; keep it or rename it, then save it or post it to the feed.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band alt" id="feed">
+  <div class="wrap">
+    <div class="feed-layout">
+      <div class="reveal">
+        <p class="eyebrow">The feed</p>
+        <h2 style="font-size:clamp(28px,3.4vw,38px); letter-spacing:-0.01em; margin-bottom:18px;">Every color anyone's claimed, in one place</h2>
+        <div class="prose">
+          <p>Discover is a browsable wall of every named color, searchable by name or hex &mdash; scroll it like a paint deck someone else already flipped through.</p>
+          <p>Post a claim to the home feed and people can like it. Press and hold any photo post and a marker appears showing exactly where on the picture the color came from.</p>
+        </div>
+      </div>
+
+      <div class="mini-grid reveal" aria-hidden="true">
+        <div class="tile" style="background:var(--s-coral)"><span style="color:#FCEBE9">Cherry Tomato</span></div>
+        <div class="tile" style="background:var(--s-gold)"><span style="color:#3B2A08">Honey</span></div>
+        <div class="tile" style="background:var(--s-forest)"><span style="color:#EAF5EF">Pine</span></div>
+        <div class="tile" style="background:var(--s-cobalt)"><span style="color:#EAF1FA">Denim</span></div>
+        <div class="tile" style="background:var(--s-violet)"><span style="color:#F4EFFA">Iris</span></div>
+        <div class="tile" style="background:var(--s-clay)"><span style="color:#FBF0E6">Terracotta</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="weekly">
+  <div class="wrap">
+    <div class="weekly-layout">
+      <div class="match-card reveal">
+        <div class="match-row">
+          <div class="match-item">
+            <div class="match-swatch" style="background:#2F6DB0"></div>
+            <p class="label">Target</p>
+          </div>
+          <span class="match-arrow">&rarr;</span>
+          <div class="match-item">
+            <div class="match-swatch" style="background:#3169A6"></div>
+            <p class="label">Yours</p>
+          </div>
+        </div>
+        <div class="match-score">
+          <p class="diffs">R <b>4</b> &nbsp;&middot;&nbsp; G <b>11</b> &nbsp;&middot;&nbsp; B <b>2</b></p>
+          <p class="total">Score 17 &mdash; lower is closer, zero is exact</p>
+        </div>
+      </div>
+
+      <div class="reveal">
+        <p class="eyebrow">The weekly palette</p>
+        <h2 style="font-size:clamp(28px,3.4vw,38px); letter-spacing:-0.01em; margin-bottom:18px;">Five colors. One week. Go find them.</h2>
+        <div class="prose">
+          <p>Every Monday, Swatchy hands out five colors &mdash; the same five for everyone, chosen fresh each week.</p>
+          <p>Find something in the real world that matches one, photograph it, and press to sample it exactly like claiming a color. Swatchy checks your photo against the target, channel by channel, and scores how far off each of red, green, and blue came out.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band alt" id="waitlist">
+  <div class="wrap">
+    <div class="waitlist-card reveal">
+      <p class="eyebrow">Coming to the app store</p>
+      <h2>Get notified the moment Swatchy launches</h2>
+      <p class="sub">Still in development &mdash; leave your email and we'll write the second it's public on iOS and Android. No spam, just the one email.</p>
+
+      <form class="waitlist-form" id="waitlist-form" novalidate>
+        <input type="email" name="email" id="waitlist-email" placeholder="you@email.com" autocomplete="email" required>
+        <button type="submit">Join the waitlist</button>
+      </form>
+      <p class="waitlist-status" id="waitlist-status" role="status" aria-live="polite"></p>
+    </div>
+  </div>
+</section>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="footer-inner">
+      <div>
+        <span class="wordmark">Swatchy<span class="dot">.</span></span>
+        <p class="tagline" style="margin-top:8px;">Pull colors out of photos, name them, share them.</p>
+      </div>
+      <p class="stack-note">Built with Expo &middot; Clerk<br>Postgres &middot; Railway</p>
+    </div>
+  </div>
+  <div class="palette-strip" aria-hidden="true">
+    <span style="background:var(--s-clay)"></span>
+    <span style="background:var(--s-violet)"></span>
+    <span style="background:var(--s-cobalt)"></span>
+    <span style="background:var(--s-forest)"></span>
+    <span style="background:var(--s-gold)"></span>
+    <span style="background:var(--s-coral)"></span>
+  </div>
+  <p class="copyright">&copy; 2026 Swatchy</p>
+</footer>
+
+<script>
+  (function () {
+    if (!('IntersectionObserver' in window)) {
+      document.querySelectorAll('.reveal').forEach(function (el) { el.classList.add('is-visible'); });
+    } else {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-visible');
+            io.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
+      document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
+    }
+  })();
+
+  (function () {
+    var form = document.getElementById('waitlist-form');
+    var input = document.getElementById('waitlist-email');
+    var status = document.getElementById('waitlist-status');
+    var button = form.querySelector('button');
+
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      var email = input.value.trim();
+
+      status.textContent = '';
+      status.removeAttribute('data-state');
+      button.disabled = true;
+
+      fetch('/waitlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email }),
+      })
+        .then(function (res) {
+          return res.json().catch(function () { return {}; }).then(function (data) {
+            return { ok: res.ok, data: data };
+          });
+        })
+        .then(function (result) {
+          button.disabled = false;
+          if (result.ok) {
+            status.textContent = "You're on the list — thanks!";
+            status.setAttribute('data-state', 'ok');
+            form.reset();
+          } else {
+            status.textContent = (result.data && result.data.error) || 'Something went wrong. Try again.';
+            status.setAttribute('data-state', 'error');
+          }
+        })
+        .catch(function () {
+          button.disabled = false;
+          status.textContent = 'Something went wrong. Try again.';
+          status.setAttribute('data-state', 'error');
+        });
+    });
+  })();
+</script>
+</body>
+</html>

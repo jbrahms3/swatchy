@@ -9,6 +9,7 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const crypto = require('node:crypto');
+const path = require('node:path');
 const { Pool } = require('pg');
 const { clerkMiddleware, requireAuth, getAuth, clerkClient } = require('@clerk/express');
 const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
@@ -40,8 +41,30 @@ const upload = multer({
 app.use(cors());
 app.use(express.json());
 
+const asyncRoute = (fn) => (req, res, next) => fn(req, res, next).catch(next);
+
 // Ahead of clerkMiddleware so uptime probes work even if Clerk is misconfigured.
 app.get('/health', (req, res) => res.json({ ok: true }));
+
+// The public marketing page — same origin as /waitlist below, so its form
+// posts there directly with no CORS dance. Also ahead of clerkMiddleware:
+// nothing here needs a session.
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'landing.html')));
+
+app.post(
+  '/waitlist',
+  asyncRoute(async (req, res) => {
+    const email = String(req.body.email ?? '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
+      return res.status(400).json({ error: 'Enter a valid email address.' });
+    }
+    await pool.query(
+      'insert into waitlist_signups (email) values ($1) on conflict (email) do nothing',
+      [email]
+    );
+    res.status(201).json({ ok: true });
+  })
+);
 
 app.use(clerkMiddleware());
 
@@ -93,8 +116,6 @@ function postRow(row, viewerId) {
     mine: row.author_id === viewerId,
   };
 }
-
-const asyncRoute = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
 /* ------------------------------------------------------------------ *
  * Weekly challenge — a palette of colors the app picks, refreshed every
