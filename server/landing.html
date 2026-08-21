@@ -205,12 +205,6 @@
   }
   .chip-featured:hover { transform: translate(-50%, -50%) rotate(0deg); }
   .chip-featured .art { position: relative; background: var(--s-clay); padding: 16px 16px 0; }
-  .chip-featured .art .hole {
-    position: absolute; top: 12px; left: 16px;
-    width: 14px; height: 14px; border-radius: 50%;
-    background: var(--s-clay);
-    box-shadow: inset 0 0 0 3px var(--card-paper);
-  }
   .chip-featured .art svg { display: block; width: 100%; height: auto; border-radius: 6px 6px 0 0; }
   .chip-featured .info { padding: 14px 16px 18px; }
   .chip-featured .info .name { font-family: var(--font-display); font-weight: 600; font-size: 17px; color: var(--card-ink); }
@@ -417,7 +411,6 @@
 
         <div class="chip-featured">
           <div class="art">
-            <div class="hole"></div>
             <svg viewBox="0 0 220 150" role="presentation">
               <rect width="220" height="150" fill="#EDE6D6"/>
               <rect x="0" y="112" width="220" height="38" fill="#DCD3BC"/>
@@ -426,6 +419,10 @@
               <ellipse cx="88" cy="42" rx="10" ry="24" fill="#357A5E" transform="rotate(-16 88 42)"/>
               <ellipse cx="112" cy="34" rx="12" ry="28" fill="#4FA07E"/>
               <ellipse cx="136" cy="42" rx="10" ry="24" fill="#2E6B50" transform="rotate(16 136 42)"/>
+              <!-- Marks the exact spot the color was picked from -- on the pot itself,
+                   same white-ring-plus-dot language as the real app's pick marker. -->
+              <circle cx="110" cy="95" r="9" fill="#FFFFFF"/>
+              <circle cx="110" cy="95" r="6" fill="#C97A3D" stroke="rgba(0,0,0,0.2)" stroke-width="1"/>
             </svg>
           </div>
           <div class="info">
