@@ -97,6 +97,93 @@ function postRow(row, viewerId) {
 const asyncRoute = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
 /* ------------------------------------------------------------------ *
+ * Weekly challenge — a palette of colors the app picks, refreshed every
+ * ISO week. It's generated deterministically from the week key, so it's
+ * the same for every user without needing a table of its own; only the
+ * photos people submit against it do.
+ * ------------------------------------------------------------------ */
+
+const WEEKLY_PALETTE_SIZE = 5;
+
+/** ISO week key, e.g. "2026-W34" — stable Monday through Sunday. */
+function weekKeyFor(date) {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day); // nearest Thursday pins the ISO year
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+function hashSeed(str) {
+  let h = 0x811c9dc5; // FNV-1a
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/** Deterministic PRNG — same seed always produces the same stream (mulberry32). */
+function mulberry32(seed) {
+  let a = seed;
+  return function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function hslToHex(h, s, l) {
+  s /= 100;
+  l /= 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  const [r, g, b] =
+    h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  const to255 = (v) => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+  return `#${to255(r)}${to255(g)}${to255(b)}`.toUpperCase();
+}
+
+/** This week's palette — same for everyone, changes only when the week does. */
+function weeklyPalette(weekKey) {
+  const rand = mulberry32(hashSeed(weekKey));
+  const colors = [];
+  for (let i = 0; i < WEEKLY_PALETTE_SIZE; i++) {
+    const h = Math.floor(rand() * 360);
+    const s = 55 + Math.floor(rand() * 30); // 55-85%: vivid enough to hunt for
+    const l = 38 + Math.floor(rand() * 24); // 38-62%: avoids near-black/near-white
+    colors.push(hslToHex(h, s, l));
+  }
+  return colors;
+}
+
+function hexToRgbTriple(hex) {
+  const int = parseInt(hex.replace('#', ''), 16);
+  return [(int >> 16) & 255, (int >> 8) & 255, int & 255];
+}
+
+function weeklyEntryRow(row) {
+  return {
+    id: row.id,
+    slot: row.slot_index,
+    targetHex: row.target_hex,
+    photoUri: `/weekly-photo/${row.id}`,
+    photoAspect: row.photo_aspect ?? undefined,
+    pickPoint: row.pick_u === null ? undefined : { u: row.pick_u, v: row.pick_v },
+    pickedHex: row.picked_hex,
+    diffR: row.diff_r,
+    diffG: row.diff_g,
+    diffB: row.diff_b,
+    score: row.score,
+    createdAt: +row.created_at,
+  };
+}
+
+/* ------------------------------------------------------------------ *
  * Routes
  * ------------------------------------------------------------------ */
 
@@ -340,6 +427,126 @@ app.delete(
       user.id,
     ]);
     res.status(204).end();
+  })
+);
+
+app.get(
+  '/weekly',
+  requireAuth(),
+  asyncRoute(async (req, res) => {
+    const user = await ensureUser(getAuth(req).userId);
+    const weekKey = weekKeyFor(new Date());
+    const palette = weeklyPalette(weekKey);
+
+    const result = await pool.query(
+      'select * from weekly_entries where user_id = $1 and week_key = $2',
+      [user.id, weekKey]
+    );
+
+    res.json({
+      weekKey,
+      palette: palette.map((hex, slot) => ({ slot, hex })),
+      entries: result.rows.map(weeklyEntryRow),
+    });
+  })
+);
+
+app.post(
+  '/weekly/:slot',
+  requireAuth(),
+  upload.single('photo'),
+  asyncRoute(async (req, res) => {
+    const user = await ensureUser(getAuth(req).userId);
+    const slot = Number(req.params.slot);
+    const weekKey = weekKeyFor(new Date());
+    const palette = weeklyPalette(weekKey);
+
+    if (!Number.isInteger(slot) || slot < 0 || slot >= palette.length) {
+      return res.status(400).json({ error: 'invalid slot' });
+    }
+    const pickedHex = String(req.body.pickedHex ?? '').trim();
+    if (!/^#[0-9A-Fa-f]{6}$/.test(pickedHex)) {
+      return res.status(400).json({ error: 'a valid pickedHex is required' });
+    }
+    if (!req.file) return res.status(400).json({ error: 'a photo is required' });
+
+    const photoAspect = req.body.photoAspect ? Number(req.body.photoAspect) : null;
+    const pickU = req.body.pickU !== undefined ? Number(req.body.pickU) : null;
+    const pickV = req.body.pickV !== undefined ? Number(req.body.pickV) : null;
+
+    // Scored server-side against the target this route itself computes —
+    // never trust a client-supplied target hex.
+    const targetHex = palette[slot];
+    const [tr, tg, tb] = hexToRgbTriple(targetHex);
+    const [pr, pg, pb] = hexToRgbTriple(pickedHex);
+    const diffR = Math.abs(tr - pr);
+    const diffG = Math.abs(tg - pg);
+    const diffB = Math.abs(tb - pb);
+    const score = diffR + diffG + diffB;
+
+    // Resubmitting a slot replaces the previous attempt in place.
+    const existing = await pool.query(
+      'select id, photo_key from weekly_entries where user_id = $1 and week_key = $2 and slot_index = $3',
+      [user.id, weekKey, slot]
+    );
+
+    const id = existing.rows[0]?.id ?? crypto.randomUUID();
+    const ext = req.file.mimetype === 'image/png' ? 'png' : 'jpg';
+    const photoKey = `weekly/${weekKey}/${user.id}/${slot}-${id}.${ext}`;
+
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: S3_BUCKET,
+        Key: photoKey,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype,
+      })
+    );
+
+    const upserted = await pool.query(
+      `insert into weekly_entries
+        (id, user_id, week_key, slot_index, target_hex, photo_key, photo_aspect, pick_u, pick_v,
+         picked_hex, diff_r, diff_g, diff_b, score)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       on conflict (user_id, week_key, slot_index)
+       do update set
+         target_hex = excluded.target_hex, photo_key = excluded.photo_key,
+         photo_aspect = excluded.photo_aspect, pick_u = excluded.pick_u, pick_v = excluded.pick_v,
+         picked_hex = excluded.picked_hex, diff_r = excluded.diff_r, diff_g = excluded.diff_g,
+         diff_b = excluded.diff_b, score = excluded.score, created_at = now()
+       returning *`,
+      [id, user.id, weekKey, slot, targetHex, photoKey, photoAspect, pickU, pickV, pickedHex, diffR, diffG, diffB, score]
+    );
+
+    const oldPhotoKey = existing.rows[0]?.photo_key;
+    if (oldPhotoKey && oldPhotoKey !== photoKey) {
+      // Best effort — an orphaned bucket object isn't worth failing the submit over.
+      s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: oldPhotoKey })).catch((err) =>
+        console.error('[weekly] Failed to delete replaced photo from bucket', oldPhotoKey, err)
+      );
+    }
+
+    res.status(201).json(weeklyEntryRow(upserted.rows[0]));
+  })
+);
+
+// Same unauthenticated-but-unguessable-id pattern as /posts/:id/photo.
+app.get(
+  '/weekly-photo/:id',
+  asyncRoute(async (req, res) => {
+    const result = await pool.query('select photo_key from weekly_entries where id = $1', [
+      req.params.id,
+    ]);
+    const photoKey = result.rows[0]?.photo_key;
+    if (!photoKey) return res.status(404).end();
+
+    const url = await getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket: S3_BUCKET, Key: photoKey }),
+      { expiresIn: PHOTO_URL_TTL_SECONDS }
+    );
+    res.set('Cache-Control', `public, max-age=${PHOTO_URL_TTL_SECONDS}`);
+    res.redirect(302, url);
   })
 );
 

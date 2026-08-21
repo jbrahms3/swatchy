@@ -3,6 +3,7 @@ import { Image } from 'expo-image';
 import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { PhotoDetailModal } from '@/components/PhotoDetailModal';
 import { readableOn, hexToRgb } from '@/lib/color';
 import { useStore, type Post } from '@/lib/store';
 import { T, radius } from '@/lib/theme';
@@ -14,6 +15,7 @@ const PHOTO_MARKER_SIZE = 24;
 export function PostCard({ post }: { post: Post }) {
   const { toggleLike, deletePost } = useStore();
   const [holding, setHolding] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
 
   const liked = post.likedByMe;
   const mine = post.mine;
@@ -56,26 +58,31 @@ export function PostCard({ post }: { post: Post }) {
       </View>
 
       {post.photoUri && (
-        <View style={[styles.media, { aspectRatio: post.photoAspect ?? 1 }]}>
-          <Image
-            source={{ uri: post.photoUri }}
-            style={StyleSheet.absoluteFill}
-            contentFit="cover"
-            transition={180}
-          />
+        <Pressable
+          onPress={() => setShowDetail(true)}
+          accessibilityRole="button"
+          accessibilityLabel="View photo and color details">
+          <View style={[styles.media, { aspectRatio: post.photoAspect ?? 1 }]}>
+            <Image
+              source={{ uri: post.photoUri }}
+              style={StyleSheet.absoluteFill}
+              contentFit="cover"
+              transition={180}
+            />
 
-          {/* Marks the exact spot the color was pulled from — only while holding the band below. */}
-          {holding && post.pickPoint && (
-            <View
-              pointerEvents="none"
-              style={[
-                styles.photoMarker,
-                { left: `${post.pickPoint.u * 100}%`, top: `${post.pickPoint.v * 100}%` },
-              ]}>
-              <View style={[styles.photoMarkerDot, { backgroundColor: swatch.hex }]} />
-            </View>
-          )}
-        </View>
+            {/* Marks the exact spot the color was pulled from — only while holding the band below. */}
+            {holding && post.pickPoint && (
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.photoMarker,
+                  { left: `${post.pickPoint.u * 100}%`, top: `${post.pickPoint.v * 100}%` },
+                ]}>
+                <View style={[styles.photoMarkerDot, { backgroundColor: swatch.hex }]} />
+              </View>
+            )}
+          </View>
+        </Pressable>
       )}
 
       {/* The claimed color, full-bleed — the point of the post, not a footnote.
@@ -124,6 +131,8 @@ export function PostCard({ post }: { post: Post }) {
           )}
         </Pressable>
       </View>
+
+      <PhotoDetailModal post={showDetail ? post : null} onClose={() => setShowDetail(false)} />
     </View>
   );
 }

@@ -39,6 +39,31 @@ export type Profile = {
   saved: Swatch[];
 };
 
+export type WeeklySlot = { slot: number; hex: string };
+
+export type WeeklyEntry = {
+  id: string;
+  slot: number;
+  targetHex: string;
+  photoUri: string;
+  photoAspect?: number;
+  pickPoint?: { u: number; v: number };
+  pickedHex: string;
+  /** How far the photo's color came from the target, one channel at a time (0-255, lower is closer). */
+  diffR: number;
+  diffG: number;
+  diffB: number;
+  /** diffR + diffG + diffB — 0 is a perfect match. */
+  score: number;
+  createdAt: number;
+};
+
+export type Weekly = {
+  weekKey: string;
+  palette: WeeklySlot[];
+  entries: WeeklyEntry[];
+};
+
 export function newId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
@@ -63,6 +88,10 @@ function withAbsolutePhoto(post: Post, api: Api): Post {
   return post.photoUri ? { ...post, photoUri: api.resolve(post.photoUri) } : post;
 }
 
+function withAbsoluteWeeklyPhoto(entry: WeeklyEntry, api: Api): WeeklyEntry {
+  return { ...entry, photoUri: api.resolve(entry.photoUri) };
+}
+
 /* ------------------------------------------------------------------ *
  * Store
  * ------------------------------------------------------------------ */
@@ -73,6 +102,7 @@ export type Store = {
   profile: Profile;
   posts: Post[];
   myPosts: Post[];
+  weekly: Weekly | null;
 
   renameProfile(name: string): Promise<void>;
   saveSwatch(swatch: Pick<Swatch, 'name' | 'hex'>): Promise<void>;
@@ -88,6 +118,14 @@ export type Store = {
   toggleLike(postId: string): Promise<void>;
   deletePost(postId: string): Promise<void>;
   refresh(): Promise<void>;
+  loadWeekly(): Promise<void>;
+  submitWeekly(input: {
+    slot: number;
+    photoUri: string;
+    photoAspect?: number;
+    pickPoint?: { u: number; v: number };
+    pickedHex: string;
+  }): Promise<void>;
 };
 
 export function useStoreState(): Store {
@@ -97,6 +135,7 @@ export function useStoreState(): Store {
   const [ready, setReady] = useState(false);
   const [profile, setProfile] = useState<Profile>({ id: '', name: 'You', saved: [] });
   const [posts, setPosts] = useState<Post[]>([]);
+  const [weekly, setWeekly] = useState<Weekly | null>(null);
 
   const load = useCallback(async () => {
     const [me, feed] = await Promise.all([
@@ -226,6 +265,32 @@ export function useStoreState(): Store {
     [api]
   );
 
+  const loadWeekly = useCallback(async () => {
+    const data = await api.get<Weekly>('/weekly');
+    setWeekly({ ...data, entries: data.entries.map((e) => withAbsoluteWeeklyPhoto(e, api)) });
+  }, [api]);
+
+  const submitWeekly = useCallback<Store['submitWeekly']>(
+    async ({ slot, photoUri, photoAspect, pickPoint, pickedHex }) => {
+      const form = new FormData();
+      form.append('pickedHex', pickedHex);
+      if (photoAspect) form.append('photoAspect', String(photoAspect));
+      if (pickPoint) {
+        form.append('pickU', String(pickPoint.u));
+        form.append('pickV', String(pickPoint.v));
+      }
+      await appendPhoto(form, photoUri);
+
+      const entry = await api.post<WeeklyEntry>(`/weekly/${slot}`, form);
+      setWeekly((w) =>
+        w
+          ? { ...w, entries: [...w.entries.filter((e) => e.slot !== slot), withAbsoluteWeeklyPhoto(entry, api)] }
+          : w
+      );
+    },
+    [api]
+  );
+
   const myPosts = useMemo(() => posts.filter((p) => p.mine), [posts]);
 
   return {
@@ -234,6 +299,7 @@ export function useStoreState(): Store {
     profile,
     posts,
     myPosts,
+    weekly,
     renameProfile,
     saveSwatch,
     removeSaved,
@@ -242,6 +308,8 @@ export function useStoreState(): Store {
     toggleLike,
     deletePost,
     refresh: load,
+    loadWeekly,
+    submitWeekly,
   };
 }
 

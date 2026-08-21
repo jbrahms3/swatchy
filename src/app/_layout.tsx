@@ -76,6 +76,10 @@ function AuthenticatedApp() {
           name="pick"
           options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
         />
+        <Stack.Screen
+          name="weekly-capture"
+          options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
+        />
       </Stack>
     </StoreProvider>
   );

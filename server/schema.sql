@@ -52,3 +52,27 @@ create table if not exists saved_swatches (
 );
 
 create index if not exists saved_swatches_user_id_idx on saved_swatches (user_id);
+
+-- Weekly challenge. The palette itself is generated deterministically from
+-- the ISO week key (see weeklyPalette() in index.js) so it needs no table —
+-- only the photo each user submits per color does.
+create table if not exists weekly_entries (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  week_key text not null,
+  slot_index int not null,
+  target_hex text not null,
+  photo_key text not null,
+  photo_aspect real,
+  pick_u real,
+  pick_v real,
+  picked_hex text not null,
+  diff_r int not null,
+  diff_g int not null,
+  diff_b int not null,
+  score int not null,
+  created_at timestamptz not null default now(),
+  unique (user_id, week_key, slot_index)
+);
+
+create index if not exists weekly_entries_user_week_idx on weekly_entries (user_id, week_key);
