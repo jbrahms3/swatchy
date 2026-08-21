@@ -146,7 +146,7 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: '#FFFFFF',
     borderRadius: radius.md,
-    padding: 8,
+    padding: 4,
   },
   photoInset: {
     width: '100%',
