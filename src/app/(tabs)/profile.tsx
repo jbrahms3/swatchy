@@ -1,5 +1,6 @@
 import { useClerk } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
   Alert,
@@ -26,6 +27,7 @@ const COLUMNS = 3;
 export default function ProfileScreen() {
   const { profile, myPosts, renameProfile, removeSaved, renameSaved } = useStore();
   const { signOut } = useClerk();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
 
@@ -95,6 +97,15 @@ export default function ProfileScreen() {
           <Text style={styles.stats}>
             {profile.saved.length} saved · {myPosts.length} posted
           </Text>
+
+          <Pressable
+            onPress={() => router.push('/share')}
+            accessibilityRole="button"
+            accessibilityLabel="Open the shareable brand card"
+            style={({ pressed }) => [styles.shareLink, { opacity: pressed ? 0.6 : 1 }]}>
+            <Ionicons name="image-outline" size={14} color={T.textDim} />
+            <Text style={styles.shareLinkText}>Get a share card</Text>
+          </Pressable>
         </View>
 
         <Section title="Saved colors" hint={profile.saved.length ? 'Tap to rename' : undefined} />
@@ -175,6 +186,8 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   stats: { color: T.textFaint, fontSize: 13, marginTop: 6 },
+  shareLink: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14 },
+  shareLinkText: { color: T.textDim, fontSize: 13, fontWeight: '600' },
 
   section: {
     flexDirection: 'row',
