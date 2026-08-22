@@ -297,6 +297,47 @@
   .waitlist-card h2 { color: var(--card-ink); font-size: clamp(26px, 3vw, 34px); margin-top: 14px; }
   .waitlist-card .sub { color: var(--card-ink-dim); font-size: 15px; margin-top: 12px; max-width: 44ch; margin-inline: auto; }
 
+  /* The inline field in the waitlist section itself -- a second way to
+     join, for anyone who scrolls to it rather than using the bar below. */
+  .waitlist-inline-form { display: flex; gap: 10px; margin-top: 26px; flex-wrap: wrap; justify-content: center; }
+  .waitlist-inline-form input[type="email"] {
+    flex: 1 1 240px;
+    min-width: 0;
+    height: 48px;
+    border-radius: 10px;
+    border: 1px solid rgba(28, 30, 23, 0.18);
+    background: #FFFFFF;
+    padding: 0 16px;
+    font-family: var(--font-body);
+    font-size: 15px;
+    color: var(--card-ink);
+  }
+  .waitlist-inline-form input[type="email"]::placeholder { color: var(--card-ink-dim); }
+  .waitlist-inline-form button {
+    height: 48px;
+    padding: 0 22px;
+    border-radius: 10px;
+    border: none;
+    background: var(--card-ink);
+    color: var(--card-paper);
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 15px;
+    cursor: pointer;
+    transition: opacity 0.18s ease;
+  }
+  .waitlist-inline-form button:hover { opacity: 0.85; }
+  .waitlist-inline-form button:disabled { opacity: 0.5; cursor: default; }
+  .waitlist-inline-status {
+    min-height: 18px;
+    margin-top: 14px;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    letter-spacing: 0.02em;
+  }
+  .waitlist-inline-status[data-state="ok"] { color: var(--s-forest); }
+  .waitlist-inline-status[data-state="error"] { color: var(--s-coral); }
+
   /* Persistent bar, not tied to the waitlist section's scroll position --
      the email field stays reachable from anywhere on the page. */
   body { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
@@ -403,7 +444,7 @@
       <a href="#how-it-works">How it works</a>
       <a href="#weekly">Weekly palette</a>
       <a href="#feed">The feed</a>
-      <a href="#waitlist-email">Waitlist</a>
+      <a href="#waitlist">Waitlist</a>
     </nav>
   </header>
 </div>
@@ -567,7 +608,13 @@
     <div class="waitlist-card reveal">
       <p class="eyebrow">Coming to the app store</p>
       <h2>Get notified the moment Swatchy launches</h2>
-      <p class="sub">Still in development &mdash; drop your email in the bar below and we'll write the second it's public on iOS and Android. No spam, just the one email.</p>
+      <p class="sub">Still in development &mdash; leave your email and we'll write the second it's public on iOS and Android. No spam, just the one email.</p>
+
+      <form class="waitlist-inline-form" id="waitlist-form-inline" novalidate>
+        <input type="email" name="email" id="waitlist-email-inline" placeholder="you@email.com" autocomplete="email" required>
+        <button type="submit">Join the waitlist</button>
+      </form>
+      <p class="waitlist-inline-status" id="waitlist-status-inline" role="status" aria-live="polite"></p>
     </div>
   </div>
 </section>
@@ -620,22 +667,13 @@
     }
   })();
 
-  (function () {
-    var form = document.getElementById('waitlist-form');
-    var input = document.getElementById('waitlist-email');
-    var toast = document.getElementById('waitlist-toast');
+  // Two independent fields -- the sticky bar and the inline one in the
+  // waitlist section -- both post to the same endpoint. `report` is how
+  // each shows its own success/error without the two stepping on each other.
+  function wireWaitlistForm(formId, inputId, report) {
+    var form = document.getElementById(formId);
+    var input = document.getElementById(inputId);
     var button = form.querySelector('button');
-    var hideTimer = null;
-
-    function showToast(text, state) {
-      clearTimeout(hideTimer);
-      toast.textContent = text;
-      toast.setAttribute('data-state', state);
-      toast.classList.add('show');
-      hideTimer = setTimeout(function () {
-        toast.classList.remove('show');
-      }, 4000);
-    }
 
     form.addEventListener('submit', function (event) {
       event.preventDefault();
@@ -655,16 +693,37 @@
         .then(function (result) {
           button.disabled = false;
           if (result.ok) {
-            showToast("You're on the list — thanks!", 'ok');
+            report("You're on the list — thanks!", 'ok');
             form.reset();
           } else {
-            showToast((result.data && result.data.error) || 'Something went wrong. Try again.', 'error');
+            report((result.data && result.data.error) || 'Something went wrong. Try again.', 'error');
           }
         })
         .catch(function () {
           button.disabled = false;
-          showToast('Something went wrong. Try again.', 'error');
+          report('Something went wrong. Try again.', 'error');
         });
+    });
+  }
+
+  (function () {
+    var toast = document.getElementById('waitlist-toast');
+    var hideTimer = null;
+
+    wireWaitlistForm('waitlist-form', 'waitlist-email', function (text, state) {
+      clearTimeout(hideTimer);
+      toast.textContent = text;
+      toast.setAttribute('data-state', state);
+      toast.classList.add('show');
+      hideTimer = setTimeout(function () {
+        toast.classList.remove('show');
+      }, 4000);
+    });
+
+    var inlineStatus = document.getElementById('waitlist-status-inline');
+    wireWaitlistForm('waitlist-form-inline', 'waitlist-email-inline', function (text, state) {
+      inlineStatus.textContent = text;
+      inlineStatus.setAttribute('data-state', state);
     });
   })();
 </script>
