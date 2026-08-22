@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,14 +20,16 @@ export default function ShareScreen() {
 
   return (
     <View style={styles.root}>
+      {/* Invisible on purpose — this is a screenshot card, so no visible
+          chrome, but the close tap target stays right where it looks like
+          it'd be, for whoever's holding the phone. */}
       <Pressable
         onPress={() => router.back()}
         hitSlop={12}
         accessibilityRole="button"
         accessibilityLabel="Close"
-        style={[styles.close, { top: insets.top + 10 }]}>
-        <Ionicons name="close" size={20} color={T.textDim} />
-      </Pressable>
+        style={[styles.close, { top: insets.top + 10 }]}
+      />
 
       <View style={styles.center}>
         <View style={styles.logo}>
@@ -39,6 +40,7 @@ export default function ShareScreen() {
 
         <Text style={styles.name}>Swatchy</Text>
         <Text style={styles.tagline}>Every color tells a story.{'\n'}Snap it, name it, claim it.</Text>
+        <Text style={styles.waitlist}>Join the waitlist at getswatchy.com</Text>
       </View>
     </View>
   );
@@ -46,15 +48,13 @@ export default function ShareScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: T.bg },
+  // Invisible — no background, no icon — but still sized and positioned
+  // as a real tap target so the card stays chrome-free in screenshots.
   close: {
     position: 'absolute',
     right: 16,
     width: 36,
     height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: T.surfaceHi,
     zIndex: 1,
   },
 
@@ -81,5 +81,12 @@ const styles = StyleSheet.create({
     lineHeight: 25,
     textAlign: 'center',
     marginTop: 16,
+  },
+  waitlist: {
+    color: T.textFaint,
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 28,
   },
 });
