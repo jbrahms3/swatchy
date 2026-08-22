@@ -1,4 +1,5 @@
 import { useRouter } from 'expo-router';
+import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -17,6 +18,7 @@ const LOGO_COLORS = ['#E2574C', '#E8B04B', '#3F8F6F', '#2F6DB0', '#8A5FBF', '#C9
 export default function ShareScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const [showWaitlist, setShowWaitlist] = useState(true);
 
   return (
     <View style={styles.root}>
@@ -40,7 +42,14 @@ export default function ShareScreen() {
 
         <Text style={styles.name}>Swatchy</Text>
         <Text style={styles.tagline}>Every color tells a story.{'\n'}Snap it, name it, claim it.</Text>
-        <Text style={styles.waitlist}>Join the waitlist at getswatchy.com</Text>
+        {showWaitlist && (
+          <Pressable
+            onPress={() => setShowWaitlist(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Join the waitlist at getswatchy.com. Tap to hide.">
+            <Text style={styles.waitlist}>Join the waitlist at getswatchy.com</Text>
+          </Pressable>
+        )}
       </View>
     </View>
   );
