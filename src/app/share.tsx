@@ -83,9 +83,10 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   waitlist: {
-    color: T.textFaint,
-    fontSize: 13,
-    fontWeight: '600',
+    color: T.text,
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: -0.2,
     textAlign: 'center',
     marginTop: 28,
   },
