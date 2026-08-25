@@ -91,19 +91,30 @@ const SLIDES: Slide[] = [
   },
 ];
 
+type Props = {
+  /**
+   * Called on "Skip" or the final "Get started". Defaults to marking the
+   * account onboarded server-side — the real first-run behavior. Pass this
+   * in (e.g. `router.back`) when reopening the flow just to preview it, so
+   * a look-around from Profile doesn't touch that flag.
+   */
+  onFinish?: () => void;
+};
+
 /**
  * Shown once, right after sign-up, in place of the tabs — gated on
  * `profile.onboarded` (server-side, so it survives reinstalls but never
  * resurfaces for existing accounts; see ensureUser() in server/index.js).
+ * Also reachable anytime from Profile as a preview, via /onboarding.
  */
-export function Onboarding() {
+export function Onboarding({ onFinish }: Props) {
   const { completeOnboarding } = useStore();
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState(0);
 
   const slide = SLIDES[step];
   const isLast = step === SLIDES.length - 1;
-  const finish = () => completeOnboarding().catch(() => {});
+  const finish = onFinish ?? (() => completeOnboarding().catch(() => {}));
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>

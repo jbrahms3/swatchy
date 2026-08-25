@@ -105,14 +105,25 @@ export default function ProfileScreen() {
             {profile.saved.length} saved · {myPosts.length} posted
           </Text>
 
-          <Pressable
-            onPress={() => router.push('/share')}
-            accessibilityRole="button"
-            accessibilityLabel="Open the shareable brand card"
-            style={({ pressed }) => [styles.shareLink, { opacity: pressed ? 0.6 : 1 }]}>
-            <Ionicons name="image-outline" size={14} color={T.textDim} />
-            <Text style={styles.shareLinkText}>Get a share card</Text>
-          </Pressable>
+          <View style={styles.linkRow}>
+            <Pressable
+              onPress={() => router.push('/share')}
+              accessibilityRole="button"
+              accessibilityLabel="Open the shareable brand card"
+              style={({ pressed }) => [styles.shareLink, { opacity: pressed ? 0.6 : 1 }]}>
+              <Ionicons name="image-outline" size={14} color={T.textDim} />
+              <Text style={styles.shareLinkText}>Get a share card</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => router.push('/onboarding')}
+              accessibilityRole="button"
+              accessibilityLabel="Preview the onboarding flow"
+              style={({ pressed }) => [styles.shareLink, { opacity: pressed ? 0.6 : 1 }]}>
+              <Ionicons name="sparkles-outline" size={14} color={T.textDim} />
+              <Text style={styles.shareLinkText}>View onboarding</Text>
+            </Pressable>
+          </View>
         </View>
 
         <Section title="Saved colors" hint={profile.saved.length ? 'Tap to rename' : undefined} />
@@ -288,7 +299,8 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   stats: { color: T.textFaint, fontSize: 13, marginTop: 6 },
-  shareLink: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14 },
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 18, marginTop: 14 },
+  shareLink: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   shareLinkText: { color: T.textDim, fontSize: 13, fontWeight: '600' },
 
   section: {
