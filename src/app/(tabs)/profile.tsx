@@ -1,7 +1,7 @@
 import { useClerk } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -34,6 +34,7 @@ export default function ProfileScreen() {
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(profile.name);
   const [editing, setEditing] = useState<Swatch | null>(null);
+  const [postsView, setPostsView] = useState<'photos' | 'colors'>('photos');
 
   const chipSize = (width - GUTTER * 2 - 12 * (COLUMNS - 1)) / COLUMNS;
   const accent = profile.saved[0]?.hex ?? T.surfaceHi;
@@ -122,14 +123,38 @@ export default function ProfileScreen() {
           </View>
         )}
 
-        <Section title="My posts" />
+        <Section
+          title="My posts"
+          right={
+            myPosts.length > 0 ? (
+              <View style={styles.segmented}>
+                <SegmentButton
+                  label="Photos"
+                  active={postsView === 'photos'}
+                  onPress={() => setPostsView('photos')}
+                />
+                <SegmentButton
+                  label="Colors"
+                  active={postsView === 'colors'}
+                  onPress={() => setPostsView('colors')}
+                />
+              </View>
+            ) : undefined
+          }
+        />
 
         {myPosts.length === 0 ? (
           <Text style={styles.empty}>You haven’t posted to the home feed yet.</Text>
-        ) : (
+        ) : postsView === 'photos' ? (
           <View style={styles.posts}>
             {myPosts.map((post) => (
               <PostCard key={post.id} post={post} />
+            ))}
+          </View>
+        ) : (
+          <View style={styles.grid}>
+            {myPosts.map((post) => (
+              <SwatchChip key={post.id} swatch={post.swatch} size={chipSize} />
             ))}
           </View>
         )}
@@ -152,12 +177,33 @@ export default function ProfileScreen() {
   );
 }
 
-function Section({ title, hint }: { title: string; hint?: string }) {
+function Section({ title, hint, right }: { title: string; hint?: string; right?: ReactNode }) {
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title}</Text>
-      {!!hint && <Text style={styles.sectionHint}>{hint}</Text>}
+      {right ?? (!!hint && <Text style={styles.sectionHint}>{hint}</Text>)}
     </View>
+  );
+}
+
+/** One pill in the Photos/Colors toggle above "My posts". */
+function SegmentButton({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      style={[styles.segmentBtn, active && styles.segmentBtnActive]}>
+      <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -199,6 +245,18 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { color: T.text, fontSize: 18, fontWeight: '700' },
   sectionHint: { color: T.textFaint, fontSize: 12 },
+
+  segmented: {
+    flexDirection: 'row',
+    backgroundColor: T.surfaceHi,
+    borderRadius: radius.pill,
+    padding: 3,
+    gap: 2,
+  },
+  segmentBtn: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: radius.pill },
+  segmentBtnActive: { backgroundColor: T.text },
+  segmentText: { color: T.textDim, fontSize: 12, fontWeight: '700' },
+  segmentTextActive: { color: T.bg },
 
   grid: {
     flexDirection: 'row',
