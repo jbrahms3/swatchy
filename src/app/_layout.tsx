@@ -84,6 +84,10 @@ function AuthenticatedApp() {
           name="share"
           options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
         />
+        <Stack.Screen
+          name="artwork-upload"
+          options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
+        />
       </Stack>
     </StoreProvider>
   );

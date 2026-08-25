@@ -64,6 +64,18 @@ export type Weekly = {
   entries: WeeklyEntry[];
 };
 
+export type ArtworkColor = { name: string; hex: string };
+
+export type Artwork = {
+  id: string;
+  photoUri: string;
+  photoAspect?: number;
+  caption: string;
+  /** Snapshot of the colors picked from the user's collection at upload time. */
+  colors: ArtworkColor[];
+  createdAt: number;
+};
+
 export function newId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
@@ -92,6 +104,10 @@ function withAbsoluteWeeklyPhoto(entry: WeeklyEntry, api: Api): WeeklyEntry {
   return { ...entry, photoUri: api.resolve(entry.photoUri) };
 }
 
+function withAbsoluteArtworkPhoto(artwork: Artwork, api: Api): Artwork {
+  return { ...artwork, photoUri: api.resolve(artwork.photoUri) };
+}
+
 /* ------------------------------------------------------------------ *
  * Store
  * ------------------------------------------------------------------ */
@@ -103,6 +119,7 @@ export type Store = {
   posts: Post[];
   myPosts: Post[];
   weekly: Weekly | null;
+  artworks: Artwork[];
 
   renameProfile(name: string): Promise<void>;
   saveSwatch(swatch: Pick<Swatch, 'name' | 'hex'>): Promise<void>;
@@ -126,6 +143,14 @@ export type Store = {
     pickPoint?: { u: number; v: number };
     pickedHex: string;
   }): Promise<void>;
+  loadArtworks(): Promise<void>;
+  publishArtwork(input: {
+    photoUri: string;
+    photoAspect?: number;
+    caption: string;
+    colors: ArtworkColor[];
+  }): Promise<void>;
+  deleteArtwork(id: string): Promise<void>;
 };
 
 export function useStoreState(): Store {
@@ -136,6 +161,7 @@ export function useStoreState(): Store {
   const [profile, setProfile] = useState<Profile>({ id: '', name: 'You', saved: [] });
   const [posts, setPosts] = useState<Post[]>([]);
   const [weekly, setWeekly] = useState<Weekly | null>(null);
+  const [artworks, setArtworks] = useState<Artwork[]>([]);
 
   const load = useCallback(async () => {
     const [me, feed] = await Promise.all([
@@ -291,6 +317,33 @@ export function useStoreState(): Store {
     [api]
   );
 
+  const loadArtworks = useCallback(async () => {
+    const data = await api.get<Artwork[]>('/artworks');
+    setArtworks(data.map((a) => withAbsoluteArtworkPhoto(a, api)));
+  }, [api]);
+
+  const publishArtwork = useCallback<Store['publishArtwork']>(
+    async ({ photoUri, photoAspect, caption, colors }) => {
+      const form = new FormData();
+      form.append('caption', caption);
+      form.append('colors', JSON.stringify(colors));
+      if (photoAspect) form.append('photoAspect', String(photoAspect));
+      await appendPhoto(form, photoUri);
+
+      const created = await api.post<Artwork>('/artworks', form);
+      setArtworks((all) => [withAbsoluteArtworkPhoto(created, api), ...all]);
+    },
+    [api]
+  );
+
+  const deleteArtwork = useCallback(
+    async (id: string) => {
+      await api.del(`/artworks/${id}`);
+      setArtworks((all) => all.filter((a) => a.id !== id));
+    },
+    [api]
+  );
+
   const myPosts = useMemo(() => posts.filter((p) => p.mine), [posts]);
 
   return {
@@ -300,6 +353,7 @@ export function useStoreState(): Store {
     posts,
     myPosts,
     weekly,
+    artworks,
     renameProfile,
     saveSwatch,
     removeSaved,
@@ -310,6 +364,9 @@ export function useStoreState(): Store {
     refresh: load,
     loadWeekly,
     submitWeekly,
+    loadArtworks,
+    publishArtwork,
+    deleteArtwork,
   };
 }
 

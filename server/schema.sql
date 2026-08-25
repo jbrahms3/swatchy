@@ -84,3 +84,20 @@ create table if not exists waitlist_signups (
   email text not null unique,
   created_at timestamptz not null default now()
 );
+
+-- Artwork someone made using colors from their own collection (saved
+-- swatches + colors they've claimed via posts). `colors` is a snapshot of
+-- {name, hex} at upload time, not a live reference — a saved swatch getting
+-- renamed or removed later shouldn't rewrite what an old artwork says it used.
+create table if not exists artworks (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  photo_key text not null,
+  photo_aspect real,
+  caption text not null default '',
+  colors jsonb not null default '[]',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists artworks_user_id_idx on artworks (user_id);
+create index if not exists artworks_created_at_idx on artworks (created_at desc);

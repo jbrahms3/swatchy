@@ -1,7 +1,8 @@
 import { useClerk } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -18,14 +19,15 @@ import { PostCard } from '@/components/PostCard';
 import { SwatchChip } from '@/components/SwatchChip';
 import { SwatchEditor } from '@/components/SwatchEditor';
 import { hexToRgb, readableOn } from '@/lib/color';
-import { useStore, type Swatch } from '@/lib/store';
+import { useStore, type Artwork, type ArtworkColor, type Swatch } from '@/lib/store';
 import { FAB_CLEARANCE, T, radius } from '@/lib/theme';
 
 const GUTTER = 16;
 const COLUMNS = 3;
 
 export default function ProfileScreen() {
-  const { profile, myPosts, renameProfile, removeSaved, renameSaved } = useStore();
+  const { profile, myPosts, artworks, renameProfile, removeSaved, renameSaved, loadArtworks } =
+    useStore();
   const { signOut } = useClerk();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -34,7 +36,11 @@ export default function ProfileScreen() {
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(profile.name);
   const [editing, setEditing] = useState<Swatch | null>(null);
-  const [postsView, setPostsView] = useState<'photos' | 'colors'>('photos');
+  const [postsView, setPostsView] = useState<'photos' | 'colors' | 'artwork'>('photos');
+
+  useEffect(() => {
+    loadArtworks().catch((err) => console.error('[profile] Failed to load artworks', err));
+  }, [loadArtworks]);
 
   const chipSize = (width - GUTTER * 2 - 12 * (COLUMNS - 1)) / COLUMNS;
   const accent = profile.saved[0]?.hex ?? T.surfaceHi;
@@ -126,36 +132,68 @@ export default function ProfileScreen() {
         <Section
           title="My posts"
           right={
-            myPosts.length > 0 ? (
-              <View style={styles.segmented}>
-                <SegmentButton
-                  label="Photos"
-                  active={postsView === 'photos'}
-                  onPress={() => setPostsView('photos')}
-                />
-                <SegmentButton
-                  label="Colors"
-                  active={postsView === 'colors'}
-                  onPress={() => setPostsView('colors')}
-                />
-              </View>
-            ) : undefined
+            <View style={styles.segmented}>
+              <SegmentButton
+                label="Photos"
+                active={postsView === 'photos'}
+                onPress={() => setPostsView('photos')}
+              />
+              <SegmentButton
+                label="Colors"
+                active={postsView === 'colors'}
+                onPress={() => setPostsView('colors')}
+              />
+              <SegmentButton
+                label="Artwork"
+                active={postsView === 'artwork'}
+                onPress={() => setPostsView('artwork')}
+              />
+            </View>
           }
         />
 
-        {myPosts.length === 0 ? (
-          <Text style={styles.empty}>You haven’t posted to the home feed yet.</Text>
-        ) : postsView === 'photos' ? (
-          <View style={styles.posts}>
-            {myPosts.map((post) => (
-              <PostCard key={post.id} post={post} />
-            ))}
-          </View>
+        {postsView === 'photos' ? (
+          myPosts.length === 0 ? (
+            <Text style={styles.empty}>You haven’t posted to the home feed yet.</Text>
+          ) : (
+            <View style={styles.posts}>
+              {myPosts.map((post) => (
+                <PostCard key={post.id} post={post} />
+              ))}
+            </View>
+          )
+        ) : postsView === 'colors' ? (
+          myPosts.length === 0 ? (
+            <Text style={styles.empty}>You haven’t posted to the home feed yet.</Text>
+          ) : (
+            <View style={styles.grid}>
+              {myPosts.map((post) => (
+                <SwatchChip key={post.id} swatch={post.swatch} size={chipSize} />
+              ))}
+            </View>
+          )
         ) : (
-          <View style={styles.grid}>
-            {myPosts.map((post) => (
-              <SwatchChip key={post.id} swatch={post.swatch} size={chipSize} />
-            ))}
+          <View style={styles.artworkSection}>
+            <Pressable
+              onPress={() => router.push('/artwork-upload')}
+              accessibilityRole="button"
+              accessibilityLabel="Upload artwork"
+              style={({ pressed }) => [styles.uploadArtwork, { opacity: pressed ? 0.7 : 1 }]}>
+              <Ionicons name="add-circle-outline" size={18} color={T.text} />
+              <Text style={styles.uploadArtworkText}>Upload artwork</Text>
+            </Pressable>
+
+            {artworks.length === 0 ? (
+              <Text style={[styles.empty, styles.emptyNoGutter]}>
+                Upload a piece and tag it with colors from your collection.
+              </Text>
+            ) : (
+              <View style={styles.artworkList}>
+                {artworks.map((artwork) => (
+                  <ArtworkCard key={artwork.id} artwork={artwork} />
+                ))}
+              </View>
+            )}
           </View>
         )}
 
@@ -204,6 +242,24 @@ function SegmentButton({
       style={[styles.segmentBtn, active && styles.segmentBtnActive]}>
       <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{label}</Text>
     </Pressable>
+  );
+}
+
+function ArtworkCard({ artwork }: { artwork: Artwork }) {
+  return (
+    <View style={styles.artworkCard}>
+      <View style={[styles.artworkPhoto, { aspectRatio: artwork.photoAspect ?? 1 }]}>
+        <Image source={{ uri: artwork.photoUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+      </View>
+      {artwork.colors.length > 0 && (
+        <View style={styles.artworkColors}>
+          {artwork.colors.map((c: ArtworkColor) => (
+            <View key={c.hex} style={[styles.artworkDot, { backgroundColor: c.hex }]} />
+          ))}
+        </View>
+      )}
+      {!!artwork.caption && <Text style={styles.artworkCaption}>{artwork.caption}</Text>}
+    </View>
   );
 }
 
@@ -258,6 +314,41 @@ const styles = StyleSheet.create({
   segmentText: { color: T.textDim, fontSize: 12, fontWeight: '700' },
   segmentTextActive: { color: T.bg },
 
+  artworkSection: { paddingHorizontal: GUTTER },
+  uploadArtwork: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'flex-start',
+    backgroundColor: T.surfaceHi,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: T.border,
+    borderRadius: radius.pill,
+    paddingVertical: 9,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  uploadArtworkText: { color: T.text, fontSize: 14, fontWeight: '700' },
+
+  artworkList: { gap: 14 },
+  artworkCard: {
+    backgroundColor: T.surface,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: T.border,
+    overflow: 'hidden',
+  },
+  artworkPhoto: { width: '100%', backgroundColor: T.surfaceHi },
+  artworkColors: { flexDirection: 'row', gap: 6, padding: 12, flexWrap: 'wrap' },
+  artworkDot: {
+    width: 20,
+    height: 20,
+    borderRadius: radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.16)',
+  },
+  artworkCaption: { color: T.textDim, fontSize: 13, lineHeight: 18, paddingHorizontal: 12, paddingBottom: 12 },
+
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -271,6 +362,9 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     paddingHorizontal: GUTTER,
   },
+  // Used inside containers that already carry their own horizontal padding
+  // (e.g. artworkSection), so it doesn't stack on top of theirs.
+  emptyNoGutter: { paddingHorizontal: 0 },
   signOut: { alignSelf: 'center', marginTop: 32, padding: 12 },
   signOutText: { color: T.danger, fontSize: 14, fontWeight: '600' },
 });

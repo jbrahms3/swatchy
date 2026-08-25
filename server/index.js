@@ -204,6 +204,17 @@ function weeklyEntryRow(row) {
   };
 }
 
+function artworkRow(row) {
+  return {
+    id: row.id,
+    photoUri: `/artworks/${row.id}/photo`,
+    photoAspect: row.photo_aspect ?? undefined,
+    caption: row.caption,
+    colors: row.colors,
+    createdAt: +row.created_at,
+  };
+}
+
 /* ------------------------------------------------------------------ *
  * Routes
  * ------------------------------------------------------------------ */
@@ -556,6 +567,114 @@ app.get(
   '/weekly-photo/:id',
   asyncRoute(async (req, res) => {
     const result = await pool.query('select photo_key from weekly_entries where id = $1', [
+      req.params.id,
+    ]);
+    const photoKey = result.rows[0]?.photo_key;
+    if (!photoKey) return res.status(404).end();
+
+    const url = await getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket: S3_BUCKET, Key: photoKey }),
+      { expiresIn: PHOTO_URL_TTL_SECONDS }
+    );
+    res.set('Cache-Control', `public, max-age=${PHOTO_URL_TTL_SECONDS}`);
+    res.redirect(302, url);
+  })
+);
+
+const MAX_ARTWORK_COLORS = 12;
+
+app.get(
+  '/artworks',
+  requireAuth(),
+  asyncRoute(async (req, res) => {
+    const user = await ensureUser(getAuth(req).userId);
+    const result = await pool.query(
+      'select * from artworks where user_id = $1 order by created_at desc',
+      [user.id]
+    );
+    res.json(result.rows.map(artworkRow));
+  })
+);
+
+app.post(
+  '/artworks',
+  requireAuth(),
+  upload.single('photo'),
+  asyncRoute(async (req, res) => {
+    const user = await ensureUser(getAuth(req).userId);
+    const caption = String(req.body.caption ?? '').trim().slice(0, 140);
+    const photoAspect = req.body.photoAspect ? Number(req.body.photoAspect) : null;
+
+    if (!req.file) return res.status(400).json({ error: 'a photo is required' });
+
+    let colors;
+    try {
+      colors = JSON.parse(req.body.colors ?? '[]');
+    } catch {
+      return res.status(400).json({ error: 'colors must be JSON' });
+    }
+    if (!Array.isArray(colors) || colors.length === 0) {
+      return res.status(400).json({ error: 'pick at least one color from your collection' });
+    }
+    if (colors.length > MAX_ARTWORK_COLORS) {
+      return res.status(400).json({ error: `pick at most ${MAX_ARTWORK_COLORS} colors` });
+    }
+    colors = colors.map((c) => ({
+      name: String(c?.name ?? '').trim().slice(0, 40),
+      hex: String(c?.hex ?? '').trim().toUpperCase(),
+    }));
+    if (colors.some((c) => !c.name || !/^#[0-9A-Fa-f]{6}$/.test(c.hex))) {
+      return res.status(400).json({ error: 'each color needs a name and a valid hex' });
+    }
+
+    const id = crypto.randomUUID();
+    const ext = req.file.mimetype === 'image/png' ? 'png' : 'jpg';
+    const photoKey = `artworks/${id}.${ext}`;
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: S3_BUCKET,
+        Key: photoKey,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype,
+      })
+    );
+
+    const inserted = await pool.query(
+      `insert into artworks (id, user_id, photo_key, photo_aspect, caption, colors)
+       values ($1,$2,$3,$4,$5,$6)
+       returning *`,
+      [id, user.id, photoKey, photoAspect, caption, JSON.stringify(colors)]
+    );
+
+    res.status(201).json(artworkRow(inserted.rows[0]));
+  })
+);
+
+app.delete(
+  '/artworks/:id',
+  requireAuth(),
+  asyncRoute(async (req, res) => {
+    const user = await ensureUser(getAuth(req).userId);
+    const result = await pool.query(
+      'delete from artworks where id = $1 and user_id = $2 returning photo_key',
+      [req.params.id, user.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'not found' });
+
+    const photoKey = result.rows[0].photo_key;
+    s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: photoKey })).catch((err) =>
+      console.error('[artworks] Failed to delete photo from bucket', photoKey, err)
+    );
+    res.status(204).end();
+  })
+);
+
+// Same unauthenticated-but-unguessable-id pattern as /posts/:id/photo.
+app.get(
+  '/artworks/:id/photo',
+  asyncRoute(async (req, res) => {
+    const result = await pool.query('select photo_key from artworks where id = $1', [
       req.params.id,
     ]);
     const photoKey = result.rows[0]?.photo_key;
