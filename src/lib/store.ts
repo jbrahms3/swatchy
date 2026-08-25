@@ -36,6 +36,7 @@ export type Post = {
 export type Profile = {
   id: string;
   name: string;
+  onboarded: boolean;
   saved: Swatch[];
 };
 
@@ -122,6 +123,7 @@ export type Store = {
   artworks: Artwork[];
 
   renameProfile(name: string): Promise<void>;
+  completeOnboarding(): Promise<void>;
   saveSwatch(swatch: Pick<Swatch, 'name' | 'hex'>): Promise<void>;
   removeSaved(id: string): Promise<void>;
   renameSaved(id: string, name: string): Promise<void>;
@@ -158,7 +160,7 @@ export function useStoreState(): Store {
   const api = useMemo(() => makeApi(() => getToken()), [getToken]);
 
   const [ready, setReady] = useState(false);
-  const [profile, setProfile] = useState<Profile>({ id: '', name: 'You', saved: [] });
+  const [profile, setProfile] = useState<Profile>({ id: '', name: 'You', onboarded: true, saved: [] });
   const [posts, setPosts] = useState<Post[]>([]);
   const [weekly, setWeekly] = useState<Weekly | null>(null);
   const [artworks, setArtworks] = useState<Artwork[]>([]);
@@ -203,6 +205,19 @@ export function useStoreState(): Store {
     },
     [api]
   );
+
+  const completeOnboarding = useCallback(async () => {
+    // Flip the UI immediately — onboarding is a one-way door, and there's
+    // nothing useful to show if this PATCH is still in flight.
+    setProfile((p) => ({ ...p, onboarded: true }));
+    try {
+      await api.patch('/me', { onboarded: true });
+    } catch (err) {
+      console.error('[store] Failed to persist onboarding completion', err);
+      // Not rolled back on purpose — retrying the whole flow on the next
+      // launch because of a flaky PATCH would be worse than a rare miss.
+    }
+  }, [api]);
 
   const saveSwatch = useCallback(
     async (swatch: Pick<Swatch, 'name' | 'hex'>) => {
@@ -355,6 +370,7 @@ export function useStoreState(): Store {
     weekly,
     artworks,
     renameProfile,
+    completeOnboarding,
     saveSwatch,
     removeSaved,
     renameSaved,

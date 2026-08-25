@@ -7,6 +7,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthScreen } from '@/components/AuthScreen';
+import { Onboarding } from '@/components/Onboarding';
 import { clerkTokenCache } from '@/lib/clerkTokenCache';
 import { StoreProvider, useStoreState } from '@/lib/store';
 import { T } from '@/lib/theme';
@@ -61,6 +62,14 @@ function AuthenticatedApp() {
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: T.bg }}>
         <ActivityIndicator color={T.text} />
       </View>
+    );
+  }
+
+  if (!store.profile.onboarded) {
+    return (
+      <StoreProvider value={store}>
+        <Onboarding />
+      </StoreProvider>
     );
   }
 

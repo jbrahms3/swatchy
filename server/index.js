@@ -85,7 +85,7 @@ async function ensureUser(clerkId) {
     'You';
 
   const inserted = await pool.query(
-    'insert into users (clerk_id, name) values ($1, $2) returning *',
+    'insert into users (clerk_id, name, onboarded) values ($1, $2, false) returning *',
     [clerkId, name]
   );
   return inserted.rows[0];
@@ -228,7 +228,12 @@ app.get(
       'select id, name, hex, created_at from saved_swatches where user_id = $1 order by created_at desc',
       [user.id]
     );
-    res.json({ id: user.id, name: user.name, saved: saved.rows.map(swatchRow) });
+    res.json({
+      id: user.id,
+      name: user.name,
+      onboarded: user.onboarded,
+      saved: saved.rows.map(swatchRow),
+    });
   })
 );
 
@@ -238,8 +243,13 @@ app.patch(
   asyncRoute(async (req, res) => {
     const user = await ensureUser(getAuth(req).userId);
     const name = String(req.body.name ?? '').trim().slice(0, 24) || user.name;
-    await pool.query('update users set name = $1 where id = $2', [name, user.id]);
-    res.json({ id: user.id, name });
+    const onboarded = req.body.onboarded === undefined ? user.onboarded : !!req.body.onboarded;
+    await pool.query('update users set name = $1, onboarded = $2 where id = $3', [
+      name,
+      onboarded,
+      user.id,
+    ]);
+    res.json({ id: user.id, name, onboarded });
   })
 );
 

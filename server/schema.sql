@@ -14,6 +14,11 @@ create table if not exists users (
   created_at timestamptz not null default now()
 );
 
+-- Defaults true so it backfills existing rows as already-onboarded; new
+-- signups override it to false explicitly in ensureUser() so only they see
+-- the onboarding flow.
+alter table users add column if not exists onboarded boolean not null default true;
+
 create table if not exists posts (
   id uuid primary key default gen_random_uuid(),
   author_id uuid not null references users(id) on delete cascade,
