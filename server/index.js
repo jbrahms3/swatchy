@@ -84,8 +84,16 @@ async function ensureUser(clerkId) {
     clerkUser.emailAddresses[0]?.emailAddress?.split('@')[0] ||
     'You';
 
+  // Two concurrent first-ever requests for the same brand-new user (e.g.
+  // /me and /posts firing in parallel from the client's initial load) can
+  // both miss the SELECT above and race to insert the same clerk_id.
+  // ON CONFLICT DO UPDATE (a harmless no-op) instead of DO NOTHING means
+  // RETURNING still hands back a row to the loser too, instead of erroring.
   const inserted = await pool.query(
-    'insert into users (clerk_id, name, onboarded) values ($1, $2, false) returning *',
+    `insert into users (clerk_id, name, onboarded)
+     values ($1, $2, false)
+     on conflict (clerk_id) do update set clerk_id = excluded.clerk_id
+     returning *`,
     [clerkId, name]
   );
   return inserted.rows[0];
