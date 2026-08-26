@@ -138,6 +138,8 @@ export type Store = {
   deletePost(postId: string): Promise<void>;
   refresh(): Promise<void>;
   loadWeekly(): Promise<void>;
+  /** Runs the weekly-palette generator against a fresh random seed, just to look at it — doesn't touch the real challenge. */
+  previewWeeklyPalette(): Promise<WeeklySlot[]>;
   submitWeekly(input: {
     slot: number;
     photoUri: string;
@@ -311,6 +313,11 @@ export function useStoreState(): Store {
     setWeekly({ ...data, entries: data.entries.map((e) => withAbsoluteWeeklyPhoto(e, api)) });
   }, [api]);
 
+  const previewWeeklyPalette = useCallback(async () => {
+    const data = await api.get<{ seed: string; palette: WeeklySlot[] }>('/weekly/preview');
+    return data.palette;
+  }, [api]);
+
   const submitWeekly = useCallback<Store['submitWeekly']>(
     async ({ slot, photoUri, photoAspect, pickPoint, pickedHex }) => {
       const form = new FormData();
@@ -379,6 +386,7 @@ export function useStoreState(): Store {
     deletePost,
     refresh: load,
     loadWeekly,
+    previewWeeklyPalette,
     submitWeekly,
     loadArtworks,
     publishArtwork,

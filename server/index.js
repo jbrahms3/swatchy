@@ -501,6 +501,21 @@ app.get(
   })
 );
 
+// Dev/preview only — weeklyPalette() takes any string, not just a real ISO
+// week key, so this just runs it against a fresh random seed each call to
+// show what the generator produces. Doesn't touch weekly_entries, and has
+// no bearing on the real weekly challenge (still scored against the actual
+// current week, computed server-side in POST /weekly/:slot).
+app.get(
+  '/weekly/preview',
+  requireAuth(),
+  asyncRoute(async (req, res) => {
+    const seed = crypto.randomUUID();
+    const palette = weeklyPalette(seed);
+    res.json({ seed, palette: palette.map((hex, slot) => ({ slot, hex })) });
+  })
+);
+
 app.post(
   '/weekly/:slot',
   requireAuth(),

@@ -12,12 +12,25 @@ import { FAB_CLEARANCE, T, radius } from '@/lib/theme';
 export default function WeeklyScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { weekly, loadWeekly } = useStore();
+  const { weekly, loadWeekly, previewWeeklyPalette } = useStore();
   const [refreshing, setRefreshing] = useState(false);
+  const [preview, setPreview] = useState<WeeklySlot[] | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   useEffect(() => {
     loadWeekly().catch((err) => console.error('[weekly] Failed to load', err));
   }, [loadWeekly]);
+
+  const generatePreview = useCallback(async () => {
+    setPreviewLoading(true);
+    try {
+      setPreview(await previewWeeklyPalette());
+    } catch (err) {
+      console.error('[weekly] Failed to preview palette', err);
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [previewWeeklyPalette]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -63,6 +76,35 @@ export default function WeeklyScreen() {
               ? `Five colors for ${weekly.weekKey}. Find something in the real world for each — ${doneCount}/${totalCount} matched so far.`
               : 'Five colors, chosen for this week. Find something in the real world for each one.'}
           </Text>
+
+          <Pressable
+            onPress={generatePreview}
+            disabled={previewLoading}
+            accessibilityRole="button"
+            accessibilityLabel="Generate a preview palette"
+            style={({ pressed }) => [styles.previewBtn, { opacity: pressed || previewLoading ? 0.6 : 1 }]}>
+            <Ionicons name="shuffle-outline" size={14} color={T.textDim} />
+            <Text style={styles.previewBtnText}>
+              {previewLoading ? 'Generating…' : preview ? 'Generate another' : 'See how the generator works'}
+            </Text>
+          </Pressable>
+
+          {preview && (
+            <>
+              <Text style={styles.previewNote}>
+                Preview only — not this week's real challenge, and nothing here is saved.
+              </Text>
+              <View style={styles.previewRow}>
+                {preview.map((p) => (
+                  <View key={p.slot} style={[styles.previewSwatch, { backgroundColor: p.hex }]}>
+                    <Text style={[styles.previewHex, { color: readableOn(hexToRgb(p.hex)) }]}>
+                      {p.hex}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
         </View>
       }
       ListEmptyComponent={
@@ -128,6 +170,21 @@ const styles = StyleSheet.create({
   header: { marginBottom: 18 },
   title: { color: T.text, fontSize: 32, fontWeight: '800', letterSpacing: -0.5 },
   subtitle: { color: T.textFaint, fontSize: 14, marginTop: 4, lineHeight: 20 },
+
+  previewBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14, alignSelf: 'flex-start' },
+  previewBtnText: { color: T.textDim, fontSize: 13, fontWeight: '600' },
+  previewNote: { color: T.textFaint, fontSize: 11, marginTop: 10, lineHeight: 15 },
+  previewRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  previewSwatch: {
+    flex: 1,
+    height: 56,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  previewHex: { fontSize: 10, fontWeight: '700', fontVariant: ['tabular-nums'] },
 
   row: {
     backgroundColor: T.surface,
