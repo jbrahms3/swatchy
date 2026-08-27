@@ -73,8 +73,8 @@ export default function WeeklyScreen() {
           <Text style={styles.title}>Weekly palette</Text>
           <Text style={styles.subtitle}>
             {weekly
-              ? `Five colors for ${weekly.weekKey}. Find something in the real world for each — ${doneCount}/${totalCount} matched so far.`
-              : 'Five colors, chosen for this week. Find something in the real world for each one.'}
+              ? `${totalCount} colors for ${weekly.weekKey}. Find something in the real world for each — ${doneCount}/${totalCount} matched so far.`
+              : "This week's colors, the same for everyone. Find something in the real world for each one."}
           </Text>
 
           <Pressable

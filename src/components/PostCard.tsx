@@ -106,7 +106,12 @@ export function PostCard({ post }: { post: Post }) {
             <Text style={[styles.bandName, { color: ink }]} numberOfLines={1}>
               {swatch.name}
             </Text>
-            <Text style={[styles.bandHex, { color: ink }]}>{swatch.hex}</Text>
+            <Text style={[styles.bandHex, { color: ink }]}>
+              {swatch.hex}
+              {swatch.artworkCount > 0
+                ? ` · in ${swatch.artworkCount} ${swatch.artworkCount === 1 ? 'artwork' : 'artworks'}`
+                : ''}
+            </Text>
           </View>
           {canLocate && <Ionicons name="locate-outline" size={18} color={ink} style={styles.bandHint} />}
         </View>

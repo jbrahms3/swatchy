@@ -24,6 +24,18 @@ npx expo start
 Scan the QR code with [Expo Go](https://expo.dev/go) on your phone, or press
 `w` for the web build.
 
+## Weekly palettes
+
+The weekly challenge runs off a curated queue. An admin adds palettes by hex
+from **Profile → Weekly palettes**, and the first request in a new ISO week
+promotes the next one in line — so the swap happens Monday 00:00 UTC without a
+scheduler. A week that starts with an empty queue gets a generated palette
+instead (`weeklyPalette()` in `server/index.js`), which is then pinned for that
+week like any other.
+
+Who can curate is the `ADMIN_EMAILS` env var on the API service — a
+comma-separated list of Clerk account emails, defaulting to the repo owner's.
+
 ## Web build (production)
 
 ```bash
