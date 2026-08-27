@@ -12,6 +12,14 @@ export function rgbToHex({ r, g, b }: RGB): string {
   return `#${hex(r)}${hex(g)}${hex(b)}`.toUpperCase();
 }
 
+/** "#a1b2c3", "a1b2c3" and "#abc" all normalize to "#A1B2C3". Null if it isn't one. */
+export function normalizeHex(input: string): string | null {
+  const raw = input.trim().replace(/^#/, '');
+  if (!/^([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(raw)) return null;
+  const full = raw.length === 3 ? raw.replace(/./g, (c) => c + c) : raw;
+  return `#${full.toUpperCase()}`;
+}
+
 export function hexToRgb(hex: string): RGB {
   let h = hex.replace('#', '').trim();
   if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
@@ -90,7 +98,7 @@ export function rgbToLab({ r, g, b }: RGB): Lab {
 }
 
 /** CIE94 color difference (graphic-arts weights). Lower is closer. */
-function deltaE94(p: Lab, q: Lab): number {
+export function deltaE94(p: Lab, q: Lab): number {
   const dL = p.L - q.L;
   const c1 = Math.hypot(p.a, p.b);
   const c2 = Math.hypot(q.a, q.b);

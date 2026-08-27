@@ -81,7 +81,7 @@ const SLIDES: Slide[] = [
   },
   {
     title: 'A new challenge every week',
-    body: 'Every Monday, Swatchy hands out five colors. Find something in the real world that matches one, photograph it, and see how close you got — scored channel by channel.',
+    body: 'Every Monday, Swatchy hands out a new palette. Find something in the real world that matches one of its colors, photograph it, and see how close you got — scored channel by channel.',
     art: <WeeklyArt />,
   },
   {

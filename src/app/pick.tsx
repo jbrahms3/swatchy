@@ -177,7 +177,13 @@ export default function PickScreen() {
     // Only one claim per photo — every release replaces it, so you can keep
     // re-picking spots until you land on the one you want.
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    setSwatch({ id: newId(), name: suggestName(current.rgb), hex: rgbToHex(current.rgb), createdAt: Date.now() });
+    setSwatch({
+      id: newId(),
+      name: suggestName(current.rgb),
+      hex: rgbToHex(current.rgb),
+      createdAt: Date.now(),
+      artworkCount: 0, // brand new — nothing's tagged it yet
+    });
     if (fitted) {
       setPickPoint({ u: clamp01(current.x / fitted.width), v: clamp01(current.y / fitted.height) });
     }

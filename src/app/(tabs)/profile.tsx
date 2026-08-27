@@ -123,6 +123,17 @@ export default function ProfileScreen() {
               <Ionicons name="sparkles-outline" size={14} color={T.textDim} />
               <Text style={styles.shareLinkText}>View onboarding</Text>
             </Pressable>
+
+            {profile.isAdmin && (
+              <Pressable
+                onPress={() => router.push('/palette-queue')}
+                accessibilityRole="button"
+                accessibilityLabel="Curate the weekly palette queue"
+                style={({ pressed }) => [styles.shareLink, { opacity: pressed ? 0.6 : 1 }]}>
+                <Ionicons name="color-palette-outline" size={14} color={T.textDim} />
+                <Text style={styles.shareLinkText}>Weekly palettes</Text>
+              </Pressable>
+            )}
           </View>
         </View>
 

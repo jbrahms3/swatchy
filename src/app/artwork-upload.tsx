@@ -3,8 +3,9 @@ import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -18,40 +19,50 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/Button';
 import { hexToRgb, readableOn } from '@/lib/color';
+import { extractProminentColorsFromUri } from '@/lib/colorExtract';
 import { useStore, type ArtworkColor } from '@/lib/store';
 import { T, radius } from '@/lib/theme';
 
 type Photo = { uri: string; width: number; height: number; aspect: number };
 
 /**
- * Upload a piece of artwork and tag it with the colors — from your saved
- * palette or ones you've claimed via posts — that it actually uses.
+ * Upload a piece of artwork. The colors it's tagged with aren't picked by
+ * hand — the photo's most prominent colors are auto-detected as soon as
+ * it's chosen (see extractProminentColors()), and that's what gets posted.
+ * A detected chip can still be removed if it's obviously wrong.
  */
 export default function ArtworkUploadScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { profile, myPosts, publishArtwork } = useStore();
+  const { publishArtwork } = useStore();
 
   const [photo, setPhoto] = useState<Photo | null>(null);
-  const [selected, setSelected] = useState<ArtworkColor[]>([]);
+  const [colors, setColors] = useState<ArtworkColor[]>([]);
+  const [detecting, setDetecting] = useState(false);
+  const [detectError, setDetectError] = useState(false);
   const [caption, setCaption] = useState('');
   const [posting, setPosting] = useState(false);
 
-  // Everything the person has collected so far — saved swatches first, then
-  // whatever they've claimed via posts, deduped so the same hex isn't offered twice.
-  const collected = useMemo(() => {
-    const all: ArtworkColor[] = [
-      ...profile.saved.map((s) => ({ name: s.name, hex: s.hex })),
-      ...myPosts.map((p) => ({ name: p.swatch.name, hex: p.swatch.hex })),
-    ];
-    const seen = new Set<string>();
-    return all.filter((c) => {
-      const key = c.hex.toUpperCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }, [profile.saved, myPosts]);
+  const detect = async (target: Photo) => {
+    setDetecting(true);
+    setDetectError(false);
+    try {
+      const found = await extractProminentColorsFromUri(target.uri, target.width, target.height);
+      setColors(found);
+    } catch (err) {
+      console.error('[artwork-upload] Failed to detect colors', err);
+      setColors([]);
+      setDetectError(true);
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (photo) detect(photo).catch(() => {});
+    // detect() is stable enough for this — re-running it is keyed off the photo, not identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photo?.uri]);
 
   const choosePhoto = async (source: 'camera' | 'library') => {
     const permission =
@@ -83,25 +94,20 @@ export default function ArtworkUploadScreen() {
     });
   };
 
-  const toggleColor = (color: ArtworkColor) => {
+  const removeColor = (hex: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    setSelected((current) => {
-      const exists = current.some((c) => c.hex.toUpperCase() === color.hex.toUpperCase());
-      return exists
-        ? current.filter((c) => c.hex.toUpperCase() !== color.hex.toUpperCase())
-        : [...current, color];
-    });
+    setColors((current) => current.filter((c) => c.hex.toUpperCase() !== hex.toUpperCase()));
   };
 
   const handleSubmit = async () => {
-    if (!photo || selected.length === 0) return;
+    if (!photo || colors.length === 0) return;
     setPosting(true);
     try {
       await publishArtwork({
         photoUri: photo.uri,
         photoAspect: photo.aspect,
         caption,
-        colors: selected,
+        colors,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       router.back();
@@ -141,14 +147,14 @@ export default function ArtworkUploadScreen() {
       {!photo ? (
         <View style={styles.chooser}>
           <View style={styles.chooserArt}>
-            {collected.slice(0, 4).map((c) => (
-              <View key={c.hex} style={[styles.chooserSwatch, { backgroundColor: c.hex }]} />
+            {['#F2B441', '#E8654E', '#5CA4A9', '#8A6FD1'].map((hex) => (
+              <View key={hex} style={[styles.chooserSwatch, { backgroundColor: hex }]} />
             ))}
           </View>
           <Text style={styles.chooserTitle}>Show off what you made</Text>
           <Text style={styles.chooserBody}>
-            Upload a photo of your artwork, then tag it with the colors from your collection
-            that you used.
+            Upload a photo of your artwork — its most prominent colors get tagged
+            automatically.
           </Text>
 
           <View style={styles.chooserActions}>
@@ -168,23 +174,33 @@ export default function ArtworkUploadScreen() {
           </View>
 
           <View style={styles.panel}>
-            <Text style={styles.panelLabel}>
-              Colors used {selected.length > 0 ? `(${selected.length})` : ''}
-            </Text>
-
-            {collected.length === 0 ? (
-              <Text style={styles.empty}>
-                Save or claim a color first — then it'll show up here to tag your artwork with.
+            <View style={styles.panelHead}>
+              <Text style={styles.panelLabel}>
+                Detected colors {colors.length > 0 ? `(${colors.length})` : ''}
               </Text>
+              {detecting && <ActivityIndicator size="small" color={T.textDim} />}
+            </View>
+
+            {detecting ? (
+              <Text style={styles.empty}>Picking out the most prominent colors…</Text>
+            ) : detectError ? (
+              <>
+                <Text style={styles.empty}>Couldn't read colors from that photo.</Text>
+                <Pressable
+                  onPress={() => photo && detect(photo)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry color detection"
+                  style={({ pressed }) => [styles.retry, { opacity: pressed ? 0.6 : 1 }]}>
+                  <Ionicons name="refresh" size={14} color={T.textDim} />
+                  <Text style={styles.retryText}>Try again</Text>
+                </Pressable>
+              </>
+            ) : colors.length === 0 ? (
+              <Text style={styles.empty}>No distinct colors stood out in that photo.</Text>
             ) : (
               <View style={styles.swatchWrap}>
-                {collected.map((c) => (
-                  <ColorToggle
-                    key={c.hex}
-                    color={c}
-                    active={selected.some((s) => s.hex.toUpperCase() === c.hex.toUpperCase())}
-                    onPress={() => toggleColor(c)}
-                  />
+                {colors.map((c) => (
+                  <ColorChip key={c.hex} color={c} onRemove={() => removeColor(c.hex)} />
                 ))}
               </View>
             )}
@@ -202,7 +218,7 @@ export default function ArtworkUploadScreen() {
               label="Upload artwork"
               onPress={handleSubmit}
               busy={posting}
-              disabled={selected.length === 0}
+              disabled={colors.length === 0 || detecting}
               style={{ marginHorizontal: 16, marginTop: 14, marginBottom: insets.bottom + 12 }}
             />
           </View>
@@ -212,27 +228,18 @@ export default function ArtworkUploadScreen() {
   );
 }
 
-function ColorToggle({
-  color,
-  active,
-  onPress,
-}: {
-  color: ArtworkColor;
-  active: boolean;
-  onPress: () => void;
-}) {
+function ColorChip({ color, onRemove }: { color: ArtworkColor; onRemove: () => void }) {
   const ink = readableOn(hexToRgb(color.hex));
   return (
     <Pressable
-      onPress={onPress}
+      onPress={onRemove}
       accessibilityRole="button"
-      accessibilityState={{ selected: active }}
-      accessibilityLabel={`${color.name}, ${color.hex}${active ? ', selected' : ''}`}
-      style={[styles.toggle, { backgroundColor: color.hex }, active && styles.toggleActive]}>
-      {active && <Ionicons name="checkmark" size={16} color={ink} style={styles.toggleCheck} />}
-      <Text style={[styles.toggleText, { color: ink }]} numberOfLines={1}>
+      accessibilityLabel={`${color.name}, ${color.hex}. Tap to remove.`}
+      style={[styles.chip, { backgroundColor: color.hex }]}>
+      <Text style={[styles.chipText, { color: ink }]} numberOfLines={1}>
         {color.name}
       </Text>
+      <Ionicons name="close" size={13} color={ink} />
     </Pressable>
   );
 }
@@ -277,14 +284,19 @@ const styles = StyleSheet.create({
     backgroundColor: T.surface,
     paddingTop: 14,
   },
+  panelHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    marginBottom: 10,
+  },
   panelLabel: {
     color: T.textFaint,
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0.4,
     textTransform: 'uppercase',
-    paddingHorizontal: 16,
-    marginBottom: 10,
   },
   empty: {
     color: T.textFaint,
@@ -292,6 +304,14 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     paddingHorizontal: 16,
   },
+  retry: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    marginTop: 10,
+  },
+  retryText: { color: T.textDim, fontSize: 13, fontWeight: '600' },
 
   swatchWrap: {
     flexDirection: 'row',
@@ -299,20 +319,18 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 16,
   },
-  toggle: {
+  chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     height: 34,
     paddingHorizontal: 12,
     borderRadius: radius.pill,
-    borderWidth: 2,
-    borderColor: 'transparent',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
     maxWidth: 160,
   },
-  toggleActive: { borderColor: T.text },
-  toggleCheck: { marginRight: 1 },
-  toggleText: { fontSize: 13, fontWeight: '700' },
+  chipText: { fontSize: 13, fontWeight: '700' },
 
   caption: {
     marginHorizontal: 16,

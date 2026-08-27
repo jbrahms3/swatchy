@@ -11,7 +11,7 @@ const multer = require('multer');
 const crypto = require('node:crypto');
 const path = require('node:path');
 const { Pool } = require('pg');
-const { clerkMiddleware, requireAuth, getAuth, clerkClient } = require('@clerk/express');
+const { clerkMiddleware, getAuth, clerkClient } = require('@clerk/express');
 const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
@@ -68,9 +68,33 @@ app.post(
 
 app.use(clerkMiddleware());
 
+/**
+ * Route guard for every authenticated endpoint. Deliberately not
+ * @clerk/express's own requireAuth(): with no signInUrl configured (this is
+ * an API, not a page), its default for an unauthenticated request is a 302
+ * to "/" — which serves landing.html. A client that follows redirects (the
+ * default) then hands its JSON parser an HTML page and gets a useless
+ * "Unexpected character: <" instead of a clean auth error. This does the
+ * same check via getAuth() but always answers in JSON.
+ */
+function requireAuth() {
+  return (req, res, next) => {
+    if (!getAuth(req)?.userId) return res.status(401).json({ error: 'unauthenticated' });
+    next();
+  };
+}
+
 /* ------------------------------------------------------------------ *
  * Helpers
  * ------------------------------------------------------------------ */
+
+/** The Clerk identity's primary email, lowercased. */
+function primaryEmail(clerkUser) {
+  const addresses = clerkUser.emailAddresses ?? [];
+  const primary =
+    addresses.find((e) => e.id === clerkUser.primaryEmailAddressId) ?? addresses[0];
+  return primary?.emailAddress?.trim().toLowerCase() ?? null;
+}
 
 /** Ensures a `users` row exists for the authenticated Clerk identity. */
 async function ensureUser(clerkId) {
@@ -78,11 +102,8 @@ async function ensureUser(clerkId) {
   if (existing.rows[0]) return existing.rows[0];
 
   const clerkUser = await clerkClient.users.getUser(clerkId);
-  const name =
-    clerkUser.firstName ||
-    clerkUser.username ||
-    clerkUser.emailAddresses[0]?.emailAddress?.split('@')[0] ||
-    'You';
+  const email = primaryEmail(clerkUser);
+  const name = clerkUser.firstName || clerkUser.username || email?.split('@')[0] || 'You';
 
   // Two concurrent first-ever requests for the same brand-new user (e.g.
   // /me and /posts firing in parallel from the client's initial load) can
@@ -90,20 +111,87 @@ async function ensureUser(clerkId) {
   // ON CONFLICT DO UPDATE (a harmless no-op) instead of DO NOTHING means
   // RETURNING still hands back a row to the loser too, instead of erroring.
   const inserted = await pool.query(
-    `insert into users (clerk_id, name, onboarded)
-     values ($1, $2, false)
+    `insert into users (clerk_id, name, email, onboarded)
+     values ($1, $2, $3, false)
      on conflict (clerk_id) do update set clerk_id = excluded.clerk_id
      returning *`,
-    [clerkId, name]
+    [clerkId, name, email]
   );
   return inserted.rows[0];
 }
 
-function swatchRow(row) {
-  return { id: row.id, name: row.name, hex: row.hex, createdAt: +row.created_at };
+/* ------------------------------------------------------------------ *
+ * Admin
+ *
+ * One short allowlist of emails, not a role column — there is exactly one
+ * curator today. Set ADMIN_EMAILS (comma-separated) to change who that is
+ * without a deploy.
+ * ------------------------------------------------------------------ */
+
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS ?? 'aidan.somsen@gmail.com')
+  .split(',')
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
+
+/**
+ * Users created before the email column existed have a null there, so fill
+ * it in from Clerk the first time we need it and keep the copy.
+ */
+async function emailFor(user) {
+  if (user.email) return user.email;
+
+  const email = primaryEmail(await clerkClient.users.getUser(user.clerk_id));
+  if (email) await pool.query('update users set email = $1 where id = $2', [email, user.id]);
+  return email;
 }
 
-function postRow(row, viewerId) {
+async function isAdmin(user) {
+  const email = await emailFor(user);
+  return !!email && ADMIN_EMAILS.includes(email);
+}
+
+/** Route guard for the curator-only endpoints. Chain it after requireAuth(). */
+const requireAdmin = () =>
+  asyncRoute(async (req, res, next) => {
+    const user = await ensureUser(getAuth(req).userId);
+    if (!(await isAdmin(user))) return res.status(403).json({ error: 'not allowed' });
+    req.appUser = user;
+    next();
+  });
+
+/** Default for swatchRow()/postRow() callers that don't need real counts (e.g. a row just created). */
+const EMPTY_COUNTS = new Map();
+
+/**
+ * How many artworks (across all users — this is a shared stat, same spirit
+ * as the feed) tag each hex, keyed by uppercased hex. One query, reused
+ * across whatever's being decorated in a given request rather than a
+ * per-swatch round trip.
+ */
+async function artworkCountsByHex() {
+  const result = await pool.query(`
+    select hex, count(*)::int as count
+    from (
+      select a.id, upper(elem->>'hex') as hex
+      from artworks a, jsonb_array_elements(a.colors) as elem
+      group by a.id, upper(elem->>'hex')
+    ) distinct_per_artwork
+    group by hex
+  `);
+  return new Map(result.rows.map((r) => [r.hex, r.count]));
+}
+
+function swatchRow(row, counts = EMPTY_COUNTS) {
+  return {
+    id: row.id,
+    name: row.name,
+    hex: row.hex,
+    createdAt: +row.created_at,
+    artworkCount: counts.get(row.hex.toUpperCase()) ?? 0,
+  };
+}
+
+function postRow(row, viewerId, counts = EMPTY_COUNTS) {
   return {
     id: row.id,
     authorId: row.author_id,
@@ -116,6 +204,7 @@ function postRow(row, viewerId) {
       name: row.swatch_name,
       hex: row.swatch_hex,
       createdAt: +row.created_at,
+      artworkCount: counts.get(row.swatch_hex.toUpperCase()) ?? 0,
     },
     caption: row.caption,
     createdAt: +row.created_at,
@@ -126,10 +215,12 @@ function postRow(row, viewerId) {
 }
 
 /* ------------------------------------------------------------------ *
- * Weekly challenge — a palette of colors the app picks, refreshed every
- * ISO week. It's generated deterministically from the week key, so it's
- * the same for every user without needing a table of its own; only the
- * photos people submit against it do.
+ * Weekly challenge — one palette per ISO week, the same for everyone.
+ *
+ * Palettes are curated: an admin queues them by hex ahead of time (see the
+ * /weekly/queue routes) and paletteForWeek() promotes the head of the queue
+ * the first time a new week is asked for. The generator below is the
+ * fallback for weeks that arrive with an empty queue.
  * ------------------------------------------------------------------ */
 
 const WEEKLY_PALETTE_SIZE = 5;
@@ -177,22 +268,147 @@ function hslToHex(h, s, l) {
   return `#${to255(r)}${to255(g)}${to255(b)}`.toUpperCase();
 }
 
+/**
+ * Hue offsets, in degrees from the week's base hue. Picking every hue at
+ * random makes five unrelated colors that clash; walking a harmony keeps
+ * them in one family, while the gaps stay wide enough that each is still
+ * its own thing to go and find. One entry per WEEKLY_PALETTE_SIZE slot.
+ */
+const HUE_HARMONIES = [
+  [0, 34, 68, 102, 136], // analogous — a single gentle sweep
+  [0, 30, 60, 170, 205], // analogous, plus a soft complementary accent
+  [0, 34, 118, 152, 240], // triadic, loosened up
+  [0, 40, 80, 200, 240], // split complementary
+  [0, 30, 62, 150, 195], // a family, then two off the far side
+];
+
+/**
+ * Perceived lightness moves a lot with hue: the same HSL lightness reads
+ * near-white in yellow but still plainly colored in blue. Trim it back
+ * around yellow and lift it around blue so the five swatches feel like
+ * one set rather than a bright one next to a dull one.
+ */
+function pastelLightnessTrim(h) {
+  return 4 * Math.cos(((h - 240) * Math.PI) / 180);
+}
+
+// How far apart two targets have to be, in the |dR|+|dG|+|dB| the scoring
+// uses, before they count as separate things to go and find. Pastels sit
+// in a narrow band, so slots left to chance can land close enough that one
+// photo would answer both; each slot tries a few shades and takes the
+// first that clears this, or the furthest away it managed.
+const MIN_SLOT_SEPARATION = 80;
+const SHADE_ATTEMPTS = 16;
+
 /** This week's palette — same for everyone, changes only when the week does. */
 function weeklyPalette(weekKey) {
   const rand = mulberry32(hashSeed(weekKey));
-  const colors = [];
-  for (let i = 0; i < WEEKLY_PALETTE_SIZE; i++) {
-    const h = Math.floor(rand() * 360);
-    const s = 55 + Math.floor(rand() * 30); // 55-85%: vivid enough to hunt for
-    const l = 38 + Math.floor(rand() * 24); // 38-62%: avoids near-black/near-white
-    colors.push(hslToHex(h, s, l));
+  const harmony = HUE_HARMONIES[Math.floor(rand() * HUE_HARMONIES.length)];
+  const baseHue = rand() * 360;
+  const direction = rand() < 0.5 ? -1 : 1; // run the harmony either way round the wheel
+
+  const chosen = [];
+  for (const offset of harmony.slice(0, WEEKLY_PALETTE_SIZE)) {
+    let best = null;
+    let bestGap = -1;
+
+    for (let attempt = 0; attempt < SHADE_ATTEMPTS; attempt++) {
+      const jitter = rand() * 10 - 5; // keeps repeat harmonies from looking identical
+      const h = (((baseHue + direction * offset + jitter) % 360) + 360) % 360;
+      const s = 30 + rand() * 18; // 30-48%: tinted, never poster-bright
+      const l = 64 + rand() * 22 + pastelLightnessTrim(h); // pastel, but still clearly a color
+      const hex = hslToHex(h, s, l);
+
+      const gap = chosen.length === 0 ? Infinity : Math.min(...chosen.map((c) => hexDistance(c, hex)));
+      if (gap > bestGap) {
+        bestGap = gap;
+        best = hex;
+      }
+      if (bestGap >= MIN_SLOT_SEPARATION) break;
+    }
+
+    chosen.push(best);
   }
-  return colors;
+  return chosen;
 }
 
 function hexToRgbTriple(hex) {
   const int = parseInt(hex.replace('#', ''), 16);
   return [(int >> 16) & 255, (int >> 8) & 255, int & 255];
+}
+
+/** How far apart two colors are, in the same units a submission is scored in. */
+function hexDistance(a, b) {
+  const [ar, ag, ab] = hexToRgbTriple(a);
+  const [br, bg, bb] = hexToRgbTriple(b);
+  return Math.abs(ar - br) + Math.abs(ag - bg) + Math.abs(ab - bb);
+}
+
+/** "#a1b2c3", "a1b2c3" and "#abc" all normalize to "#A1B2C3". Null if it isn't one. */
+function normalizeHex(input) {
+  const raw = String(input ?? '').trim().replace(/^#/, '');
+  if (!/^([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(raw)) return null;
+  const full = raw.length === 3 ? raw.replace(/./g, (c) => c + c) : raw;
+  return `#${full.toUpperCase()}`;
+}
+
+/**
+ * The palette in play for a given week, promoting the queue if this is the
+ * first request since the week rolled over.
+ *
+ * Every path writes the week's colors down before returning them, so the
+ * palette is fixed the moment the week is first looked at — queueing a
+ * palette on Wednesday can't swap out the colors people are already
+ * shooting against.
+ */
+async function paletteForWeek(weekKey) {
+  const live = await pool.query('select colors from weekly_palettes where week_key = $1', [weekKey]);
+  if (live.rows[0]) return live.rows[0].colors;
+
+  // Two requests can arrive at once on the first hit of a new week. Both
+  // statements below are single statements that lose gracefully: week_key
+  // is unique, so the loser falls through to re-reading the winner's row.
+  try {
+    const claimed = await pool.query(
+      `update weekly_palettes
+          set week_key = $1, went_live_at = now()
+        where id = (
+                select id from weekly_palettes
+                 where week_key is null
+                 order by created_at, id
+                 limit 1
+                 for update skip locked
+              )
+      returning colors`,
+      [weekKey]
+    );
+    if (claimed.rows[0]) return claimed.rows[0].colors;
+
+    // Nothing queued — generate one and keep it, so the week is pinned.
+    const generated = await pool.query(
+      `insert into weekly_palettes (colors, week_key, source, went_live_at)
+       values ($1, $2, 'generated', now())
+       on conflict (week_key) do nothing
+       returning colors`,
+      [JSON.stringify(weeklyPalette(weekKey)), weekKey]
+    );
+    if (generated.rows[0]) return generated.rows[0].colors;
+  } catch (err) {
+    if (err.code !== '23505') throw err; // anything but a week_key collision is a real failure
+  }
+
+  const raced = await pool.query('select colors from weekly_palettes where week_key = $1', [weekKey]);
+  return raced.rows[0]?.colors ?? weeklyPalette(weekKey);
+}
+
+function queuedPaletteRow(row) {
+  return {
+    id: row.id,
+    colors: row.colors,
+    source: row.source,
+    weekKey: row.week_key,
+    createdAt: +row.created_at,
+  };
 }
 
 function weeklyEntryRow(row) {
@@ -232,15 +448,20 @@ app.get(
   requireAuth(),
   asyncRoute(async (req, res) => {
     const user = await ensureUser(getAuth(req).userId);
-    const saved = await pool.query(
-      'select id, name, hex, created_at from saved_swatches where user_id = $1 order by created_at desc',
-      [user.id]
-    );
+    const [saved, admin, counts] = await Promise.all([
+      pool.query(
+        'select id, name, hex, created_at from saved_swatches where user_id = $1 order by created_at desc',
+        [user.id]
+      ),
+      isAdmin(user),
+      artworkCountsByHex(),
+    ]);
     res.json({
       id: user.id,
       name: user.name,
       onboarded: user.onboarded,
-      saved: saved.rows.map(swatchRow),
+      isAdmin: admin,
+      saved: saved.rows.map((row) => swatchRow(row, counts)),
     });
   })
 );
@@ -339,8 +560,8 @@ app.get(
   requireAuth(),
   asyncRoute(async (req, res) => {
     const user = await ensureUser(getAuth(req).userId);
-    const result = await pool.query(FEED_QUERY, [user.id]);
-    res.json(result.rows.map((row) => postRow(row, user.id)));
+    const [result, counts] = await Promise.all([pool.query(FEED_QUERY, [user.id]), artworkCountsByHex()]);
+    res.json(result.rows.map((row) => postRow(row, user.id, counts)));
   })
 );
 
@@ -486,7 +707,7 @@ app.get(
   asyncRoute(async (req, res) => {
     const user = await ensureUser(getAuth(req).userId);
     const weekKey = weekKeyFor(new Date());
-    const palette = weeklyPalette(weekKey);
+    const palette = await paletteForWeek(weekKey);
 
     const result = await pool.query(
       'select * from weekly_entries where user_id = $1 and week_key = $2',
@@ -501,11 +722,10 @@ app.get(
   })
 );
 
-// Dev/preview only — weeklyPalette() takes any string, not just a real ISO
-// week key, so this just runs it against a fresh random seed each call to
-// show what the generator produces. Doesn't touch weekly_entries, and has
-// no bearing on the real weekly challenge (still scored against the actual
-// current week, computed server-side in POST /weekly/:slot).
+// Preview only — this is the generator that fills a week in when nothing is
+// queued, run against a fresh random seed so the curator can look at what it
+// produces (and start a palette from it). Doesn't touch weekly_palettes or
+// weekly_entries, and has no bearing on the live challenge.
 app.get(
   '/weekly/preview',
   requireAuth(),
@@ -513,6 +733,93 @@ app.get(
     const seed = crypto.randomUUID();
     const palette = weeklyPalette(seed);
     res.json({ seed, palette: palette.map((hex, slot) => ({ slot, hex })) });
+  })
+);
+
+/* ------------------------------------------------------------------ *
+ * Weekly palette queue (curator only)
+ *
+ * Registered ahead of POST /weekly/:slot so "queue" isn't read as a slot
+ * number.
+ * ------------------------------------------------------------------ */
+
+const MAX_PALETTE_COLORS = 24;
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+app.get(
+  '/weekly/queue',
+  requireAuth(),
+  requireAdmin(),
+  asyncRoute(async (req, res) => {
+    const weekKey = weekKeyFor(new Date());
+
+    // Promotes the queue if the week just rolled over, so what's shown as
+    // live here is the same thing /weekly is handing out. Has to run before
+    // the reads below, which is why it isn't in the Promise.all.
+    const liveColors = await paletteForWeek(weekKey);
+    const [live, queued] = await Promise.all([
+      pool.query('select source from weekly_palettes where week_key = $1', [weekKey]),
+      pool.query('select * from weekly_palettes where week_key is null order by created_at, id'),
+    ]);
+
+    const now = Date.now();
+    res.json({
+      current: {
+        weekKey,
+        colors: liveColors,
+        source: live.rows[0]?.source ?? 'generated',
+      },
+      // Each queued palette goes live on a successive Monday, in order.
+      queued: queued.rows.map((row, i) => ({
+        ...queuedPaletteRow(row),
+        goesLiveWeekKey: weekKeyFor(new Date(now + (i + 1) * WEEK_MS)),
+      })),
+    });
+  })
+);
+
+app.post(
+  '/weekly/queue',
+  requireAuth(),
+  requireAdmin(),
+  asyncRoute(async (req, res) => {
+    const input = Array.isArray(req.body.colors) ? req.body.colors : null;
+    if (!input || input.length === 0) {
+      return res.status(400).json({ error: 'at least one color is required' });
+    }
+    if (input.length > MAX_PALETTE_COLORS) {
+      return res.status(400).json({ error: `at most ${MAX_PALETTE_COLORS} colors per palette` });
+    }
+
+    const colors = input.map(normalizeHex);
+    const badIndex = colors.indexOf(null);
+    if (badIndex !== -1) {
+      return res.status(400).json({ error: `"${input[badIndex]}" isn't a hex color` });
+    }
+
+    const inserted = await pool.query(
+      `insert into weekly_palettes (colors, source, created_by)
+       values ($1, 'curated', $2)
+       returning *`,
+      [JSON.stringify(colors), req.appUser.id]
+    );
+    res.status(201).json(queuedPaletteRow(inserted.rows[0]));
+  })
+);
+
+app.delete(
+  '/weekly/queue/:id',
+  requireAuth(),
+  requireAdmin(),
+  asyncRoute(async (req, res) => {
+    // `week_key is null` keeps this to palettes that haven't run yet — a
+    // past or current week is history, not a queue entry.
+    const result = await pool.query(
+      'delete from weekly_palettes where id = $1 and week_key is null returning id',
+      [req.params.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'not a queued palette' });
+    res.status(204).end();
   })
 );
 
@@ -524,7 +831,7 @@ app.post(
     const user = await ensureUser(getAuth(req).userId);
     const slot = Number(req.params.slot);
     const weekKey = weekKeyFor(new Date());
-    const palette = weeklyPalette(weekKey);
+    const palette = await paletteForWeek(weekKey);
 
     if (!Number.isInteger(slot) || slot < 0 || slot >= palette.length) {
       return res.status(400).json({ error: 'invalid slot' });
@@ -615,7 +922,9 @@ app.get(
   })
 );
 
-const MAX_ARTWORK_COLORS = 12;
+// Mirrors MAX_EXTRACTED_COLORS in src/lib/colorExtract.ts — the client
+// auto-tags a photo with its most prominent colors, up to this many.
+const MAX_ARTWORK_COLORS = 25;
 
 app.get(
   '/artworks',
@@ -648,10 +957,10 @@ app.post(
       return res.status(400).json({ error: 'colors must be JSON' });
     }
     if (!Array.isArray(colors) || colors.length === 0) {
-      return res.status(400).json({ error: 'pick at least one color from your collection' });
+      return res.status(400).json({ error: 'at least one tagged color is required' });
     }
     if (colors.length > MAX_ARTWORK_COLORS) {
-      return res.status(400).json({ error: `pick at most ${MAX_ARTWORK_COLORS} colors` });
+      return res.status(400).json({ error: `at most ${MAX_ARTWORK_COLORS} colors per artwork` });
     }
     colors = colors.map((c) => ({
       name: String(c?.name ?? '').trim().slice(0, 40),

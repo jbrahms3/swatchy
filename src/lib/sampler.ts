@@ -89,20 +89,22 @@ function makeSampler(bitmap: Bitmap): Sampler {
 }
 
 /**
+ * Downscales (long edge -> `maxEdge`) and decodes a photo to raw pixels.
  * `srcWidth`/`srcHeight` come from the image picker. When they're unknown we
  * just constrain the width and let the aspect fall out of the decode.
  */
-export async function loadSampler(
+export async function loadBitmap(
   uri: string,
   srcWidth?: number,
-  srcHeight?: number
-): Promise<Sampler> {
+  srcHeight?: number,
+  maxEdge = MAX_EDGE
+): Promise<Bitmap> {
   const actions: Action[] = [];
 
   if (srcWidth && srcHeight) {
     const longEdge = Math.max(srcWidth, srcHeight);
-    if (longEdge > MAX_EDGE) {
-      const scale = MAX_EDGE / longEdge;
+    if (longEdge > maxEdge) {
+      const scale = maxEdge / longEdge;
       actions.push({
         resize: {
           width: Math.round(srcWidth * scale),
@@ -111,12 +113,20 @@ export async function loadSampler(
       });
     }
   } else {
-    actions.push({ resize: { width: MAX_EDGE } });
+    actions.push({ resize: { width: maxEdge } });
   }
 
   const result = await manipulateAsync(uri, actions, { format: SaveFormat.PNG, base64: true });
 
   if (!result.base64) throw new Error('Image encoding returned no data');
 
-  return makeSampler(decodePng(base64ToBytes(result.base64)));
+  return decodePng(base64ToBytes(result.base64));
+}
+
+export async function loadSampler(
+  uri: string,
+  srcWidth?: number,
+  srcHeight?: number
+): Promise<Sampler> {
+  return makeSampler(await loadBitmap(uri, srcWidth, srcHeight));
 }

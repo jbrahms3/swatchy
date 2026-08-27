@@ -101,6 +101,10 @@ function AuthenticatedApp() {
           name="onboarding"
           options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
         />
+        <Stack.Screen
+          name="palette-queue"
+          options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
+        />
       </Stack>
     </StoreProvider>
   );

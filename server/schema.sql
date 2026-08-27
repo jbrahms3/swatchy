@@ -19,6 +19,11 @@ create table if not exists users (
 -- the onboarding flow.
 alter table users add column if not exists onboarded boolean not null default true;
 
+-- Cached from Clerk so the admin check (see ADMIN_EMAILS in index.js) is a
+-- column read rather than a Clerk API call on every request. Nullable: rows
+-- created before this column existed get backfilled lazily on first use.
+alter table users add column if not exists email text;
+
 create table if not exists posts (
   id uuid primary key default gen_random_uuid(),
   author_id uuid not null references users(id) on delete cascade,
@@ -58,9 +63,36 @@ create table if not exists saved_swatches (
 
 create index if not exists saved_swatches_user_id_idx on saved_swatches (user_id);
 
--- Weekly challenge. The palette itself is generated deterministically from
--- the ISO week key (see weeklyPalette() in index.js) so it needs no table —
--- only the photo each user submits per color does.
+-- Weekly challenge palettes, curated by an admin ahead of time.
+--
+-- A row with a null week_key is queued; the first request in a new ISO week
+-- stamps the head of the queue with that week key, which is what makes the
+-- swap happen at Monday 00:00 UTC without a scheduler running anywhere.
+-- Stamped rows are never reused, so this doubles as the history of what
+-- every past week actually asked for.
+--
+-- When the queue runs dry the generator in index.js fills the week in and
+-- the result is written here too (source = 'generated'), so a palette
+-- queued mid-week can't yank the colors out from under anyone already
+-- shooting against them.
+create table if not exists weekly_palettes (
+  id uuid primary key default gen_random_uuid(),
+  colors jsonb not null,
+  week_key text unique,
+  source text not null default 'curated',
+  created_by uuid references users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  went_live_at timestamptz
+);
+
+-- Only the queued rows are ever ordered through, so index just those.
+create index if not exists weekly_palettes_queue_idx
+  on weekly_palettes (created_at, id)
+  where week_key is null;
+
+-- The photo each user submits per color. Slots are positional into that
+-- week's palette, and target_hex is snapshotted per entry so scores stay
+-- meaningful no matter what the palette table says later.
 create table if not exists weekly_entries (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,

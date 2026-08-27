@@ -16,6 +16,8 @@ export type Swatch = {
   name: string;
   hex: string;
   createdAt: number;
+  /** How many submitted artworks are tagged with this hex, across everyone. */
+  artworkCount: number;
 };
 
 export type Post = {
@@ -37,6 +39,8 @@ export type Profile = {
   id: string;
   name: string;
   onboarded: boolean;
+  /** Curates the weekly palette queue. Server-decided — the UI only hides things. */
+  isAdmin: boolean;
   saved: Swatch[];
 };
 
@@ -63,6 +67,22 @@ export type Weekly = {
   weekKey: string;
   palette: WeeklySlot[];
   entries: WeeklyEntry[];
+};
+
+/** A palette waiting its turn in the queue. One is promoted each Monday. */
+export type QueuedPalette = {
+  id: string;
+  colors: string[];
+  /** 'curated' if someone typed it in, 'generated' if the queue was empty that week. */
+  source: 'curated' | 'generated';
+  /** The ISO week this one is currently in line for, e.g. "2026-W36". */
+  goesLiveWeekKey: string;
+  createdAt: number;
+};
+
+export type WeeklyQueue = {
+  current: { weekKey: string; colors: string[]; source: 'curated' | 'generated' };
+  queued: QueuedPalette[];
 };
 
 export type ArtworkColor = { name: string; hex: string };
@@ -147,6 +167,10 @@ export type Store = {
     pickPoint?: { u: number; v: number };
     pickedHex: string;
   }): Promise<void>;
+  /* Curator-only (profile.isAdmin) — the server rejects these for anyone else. */
+  loadWeeklyQueue(): Promise<WeeklyQueue>;
+  queuePalette(colors: string[]): Promise<void>;
+  removeQueuedPalette(id: string): Promise<void>;
   loadArtworks(): Promise<void>;
   publishArtwork(input: {
     photoUri: string;
@@ -162,7 +186,13 @@ export function useStoreState(): Store {
   const api = useMemo(() => makeApi(() => getToken()), [getToken]);
 
   const [ready, setReady] = useState(false);
-  const [profile, setProfile] = useState<Profile>({ id: '', name: 'You', onboarded: true, saved: [] });
+  const [profile, setProfile] = useState<Profile>({
+    id: '',
+    name: 'You',
+    onboarded: true,
+    isAdmin: false,
+    saved: [],
+  });
   const [posts, setPosts] = useState<Post[]>([]);
   const [weekly, setWeekly] = useState<Weekly | null>(null);
   const [artworks, setArtworks] = useState<Artwork[]>([]);
@@ -339,6 +369,22 @@ export function useStoreState(): Store {
     [api]
   );
 
+  const loadWeeklyQueue = useCallback(() => api.get<WeeklyQueue>('/weekly/queue'), [api]);
+
+  const queuePalette = useCallback(
+    async (colors: string[]) => {
+      await api.post<QueuedPalette>('/weekly/queue', { colors });
+    },
+    [api]
+  );
+
+  const removeQueuedPalette = useCallback(
+    async (id: string) => {
+      await api.del(`/weekly/queue/${id}`);
+    },
+    [api]
+  );
+
   const loadArtworks = useCallback(async () => {
     const data = await api.get<Artwork[]>('/artworks');
     setArtworks(data.map((a) => withAbsoluteArtworkPhoto(a, api)));
@@ -388,6 +434,9 @@ export function useStoreState(): Store {
     loadWeekly,
     previewWeeklyPalette,
     submitWeekly,
+    loadWeeklyQueue,
+    queuePalette,
+    removeQueuedPalette,
     loadArtworks,
     publishArtwork,
     deleteArtwork,
