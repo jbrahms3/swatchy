@@ -16,9 +16,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '@/components/Button';
 import { T, radius } from '@/lib/theme';
 
-type Mode = 'signIn' | 'signUp' | 'verify';
+type Mode = 'signIn' | 'signUp' | 'verify' | 'forgotEmail' | 'forgotReset';
 
-/** Email + password auth, with Clerk's email-code verification step on signup. */
+/**
+ * Email + password auth, with Clerk's email-code verification step on
+ * signup and its email-code reset flow for a forgotten password. Both
+ * verification steps share the same two-stage shape: request a code by
+ * email, then come back and attempt it — reset just adds a new password to
+ * the second stage.
+ */
 export function AuthScreen() {
   const insets = useSafeAreaInsets();
   const { isLoaded: signInLoaded, signIn, setActive: setActiveFromSignIn } = useSignIn();
@@ -28,6 +34,7 @@ export function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -87,9 +94,70 @@ export function AuthScreen() {
     }
   };
 
-  const submit = mode === 'signIn' ? handleSignIn : mode === 'signUp' ? handleSignUp : handleVerify;
+  const handleRequestReset = async () => {
+    if (!signInLoaded) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await signIn.create({ identifier: email.trim(), strategy: 'reset_password_email_code' });
+      setCode('');
+      setNewPassword('');
+      setMode('forgotReset');
+    } catch (err) {
+      setError(clerkMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleReset = async () => {
+    if (!signInLoaded) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const attempt = await signIn.attemptFirstFactor({
+        strategy: 'reset_password_email_code',
+        code: code.trim(),
+      });
+      if (attempt.status !== 'needs_new_password') {
+        setError('That code didn’t work. Check your email and try again.');
+        return;
+      }
+      const result = await signIn.resetPassword({
+        password: newPassword,
+        signOutOfOtherSessions: true,
+      });
+      if (result.status === 'complete') {
+        await setActiveFromSignIn({ session: result.createdSessionId });
+      } else {
+        setError('Something went wrong resetting your password. Try again.');
+      }
+    } catch (err) {
+      setError(clerkMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submit =
+    mode === 'signIn'
+      ? handleSignIn
+      : mode === 'signUp'
+        ? handleSignUp
+        : mode === 'verify'
+          ? handleVerify
+          : mode === 'forgotEmail'
+            ? handleRequestReset
+            : handleReset;
+
   const canSubmit =
-    mode === 'verify' ? code.trim().length > 0 : email.trim().length > 0 && password.length >= 8;
+    mode === 'verify'
+      ? code.trim().length > 0
+      : mode === 'forgotEmail'
+        ? email.trim().length > 0
+        : mode === 'forgotReset'
+          ? code.trim().length > 0 && newPassword.length >= 8
+          : email.trim().length > 0 && password.length >= 8;
 
   return (
     <KeyboardAvoidingView
@@ -108,11 +176,15 @@ export function AuthScreen() {
         <Text style={styles.subtitle}>
           {mode === 'verify'
             ? `Enter the code we sent to ${email.trim()}`
-            : 'Pull colors out of photos, name them, share them.'}
+            : mode === 'forgotEmail'
+              ? 'Enter your email and we’ll send you a code to reset your password.'
+              : mode === 'forgotReset'
+                ? `Enter the code we sent to ${email.trim()}, and a new password.`
+                : 'Pull colors out of photos, name them, share them.'}
         </Text>
 
         <View style={styles.form}>
-          {mode !== 'verify' ? (
+          {(mode === 'signIn' || mode === 'signUp') && (
             <>
               <TextInput
                 value={email}
@@ -136,8 +208,18 @@ export function AuthScreen() {
                 returnKeyType="go"
                 onSubmitEditing={() => canSubmit && submit()}
               />
+              {mode === 'signIn' && (
+                <Pressable
+                  onPress={() => swap('forgotEmail')}
+                  hitSlop={8}
+                  style={styles.forgotRow}>
+                  <Text style={styles.forgotText}>Forgot password?</Text>
+                </Pressable>
+              )}
             </>
-          ) : (
+          )}
+
+          {mode === 'verify' && (
             <TextInput
               value={code}
               onChangeText={setCode}
@@ -151,13 +233,65 @@ export function AuthScreen() {
             />
           )}
 
+          {mode === 'forgotEmail' && (
+            <TextInput
+              value={email}
+              onChangeText={setEmail}
+              placeholder="Email"
+              placeholderTextColor={T.textFaint}
+              style={styles.input}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              textContentType="emailAddress"
+              autoFocus
+              returnKeyType="go"
+              onSubmitEditing={() => canSubmit && submit()}
+            />
+          )}
+
+          {mode === 'forgotReset' && (
+            <>
+              <TextInput
+                value={code}
+                onChangeText={setCode}
+                placeholder="6-digit code"
+                placeholderTextColor={T.textFaint}
+                style={styles.input}
+                keyboardType="number-pad"
+                autoFocus
+              />
+              <TextInput
+                value={newPassword}
+                onChangeText={setNewPassword}
+                placeholder="New password (min. 8 characters)"
+                placeholderTextColor={T.textFaint}
+                style={styles.input}
+                secureTextEntry
+                textContentType="newPassword"
+                returnKeyType="go"
+                onSubmitEditing={() => canSubmit && submit()}
+              />
+            </>
+          )}
+
           {!!error && <Text style={styles.error}>{error}</Text>}
 
           {busy ? (
             <ActivityIndicator color={T.text} style={styles.spinner} />
           ) : (
             <Button
-              label={mode === 'signIn' ? 'Sign in' : mode === 'signUp' ? 'Create account' : 'Verify'}
+              label={
+                mode === 'signIn'
+                  ? 'Sign in'
+                  : mode === 'signUp'
+                    ? 'Create account'
+                    : mode === 'verify'
+                      ? 'Verify'
+                      : mode === 'forgotEmail'
+                        ? 'Send code'
+                        : 'Reset password'
+              }
               onPress={submit}
               disabled={!canSubmit}
             />
@@ -182,6 +316,13 @@ export function AuthScreen() {
           <Pressable onPress={() => swap('signUp')} hitSlop={8} style={styles.switchRow}>
             <Text style={styles.switchText}>
               Wrong email? <Text style={styles.switchLink}>Go back</Text>
+            </Text>
+          </Pressable>
+        )}
+        {(mode === 'forgotEmail' || mode === 'forgotReset') && (
+          <Pressable onPress={() => swap('signIn')} hitSlop={8} style={styles.switchRow}>
+            <Text style={styles.switchText}>
+              Remember it after all? <Text style={styles.switchLink}>Back to sign in</Text>
             </Text>
           </Pressable>
         )}
@@ -219,6 +360,9 @@ const styles = StyleSheet.create({
   },
   error: { color: T.danger, fontSize: 13, lineHeight: 18 },
   spinner: { marginTop: 6 },
+
+  forgotRow: { alignSelf: 'flex-end', marginTop: -4 },
+  forgotText: { color: T.textDim, fontSize: 13, fontWeight: '600' },
 
   switchRow: { marginTop: 20, alignSelf: 'center' },
   switchText: { color: T.textFaint, fontSize: 14 },

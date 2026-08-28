@@ -89,6 +89,8 @@ export type ArtworkColor = { name: string; hex: string };
 
 export type Artwork = {
   id: string;
+  /** Only set on artworks fetched by color (someone else's) — omitted on your own. */
+  authorName?: string;
   photoUri: string;
   photoAspect?: number;
   caption: string;
@@ -179,6 +181,8 @@ export type Store = {
     colors: ArtworkColor[];
   }): Promise<void>;
   deleteArtwork(id: string): Promise<void>;
+  /** Every artwork (anyone's) tagged with this hex, newest first — backs the "tagged N times" link. */
+  loadArtworksByColor(hex: string): Promise<Artwork[]>;
 };
 
 export function useStoreState(): Store {
@@ -412,6 +416,14 @@ export function useStoreState(): Store {
     [api]
   );
 
+  const loadArtworksByColor = useCallback(
+    async (hex: string) => {
+      const data = await api.get<Artwork[]>(`/artworks/by-color/${encodeURIComponent(hex)}`);
+      return data.map((a) => withAbsoluteArtworkPhoto(a, api));
+    },
+    [api]
+  );
+
   const myPosts = useMemo(() => posts.filter((p) => p.mine), [posts]);
 
   return {
@@ -440,6 +452,7 @@ export function useStoreState(): Store {
     loadArtworks,
     publishArtwork,
     deleteArtwork,
+    loadArtworksByColor,
   };
 }
 

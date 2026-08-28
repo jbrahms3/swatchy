@@ -431,6 +431,9 @@ function weeklyEntryRow(row) {
 function artworkRow(row) {
   return {
     id: row.id,
+    // Only present on the cross-user by-color listing — the owner's own
+    // /artworks doesn't join users, since every row there is already theirs.
+    authorName: row.author_name ?? undefined,
     photoUri: `/artworks/${row.id}/photo`,
     photoAspect: row.photo_aspect ?? undefined,
     caption: row.caption,
@@ -934,6 +937,33 @@ app.get(
     const result = await pool.query(
       'select * from artworks where user_id = $1 order by created_at desc',
       [user.id]
+    );
+    res.json(result.rows.map(artworkRow));
+  })
+);
+
+// Backs the "tagged N times" stat on a color: everyone's artworks that
+// tagged this exact hex, newest first — same privacy bar as the home feed
+// (any signed-in user, not just the artwork's owner), since the aggregate
+// count is already shown to every viewer of that color.
+app.get(
+  '/artworks/by-color/:hex',
+  requireAuth(),
+  asyncRoute(async (req, res) => {
+    const hex = normalizeHex(req.params.hex);
+    if (!hex) return res.status(400).json({ error: 'not a valid hex color' });
+
+    const result = await pool.query(
+      `select a.*, u.name as author_name
+         from artworks a
+         join users u on u.id = a.user_id
+        where exists (
+                select 1 from jsonb_array_elements(a.colors) elem
+                 where upper(elem->>'hex') = $1
+              )
+        order by a.created_at desc
+        limit 200`,
+      [hex] // stored colors keep the '#', e.g. "#AABBCC" — matches artworkCountsByHex()'s keys
     );
     res.json(result.rows.map(artworkRow));
   })

@@ -105,6 +105,10 @@ function AuthenticatedApp() {
           name="palette-queue"
           options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
         />
+        <Stack.Screen
+          name="color-artworks"
+          options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
+        />
       </Stack>
     </StoreProvider>
   );
