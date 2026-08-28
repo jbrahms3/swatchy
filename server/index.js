@@ -428,16 +428,16 @@ function weeklyEntryRow(row) {
   };
 }
 
-function artworkRow(row) {
+function artworkRow(row, counts = EMPTY_COUNTS) {
   return {
     id: row.id,
-    // Only present on the cross-user by-color listing — the owner's own
-    // /artworks doesn't join users, since every row there is already theirs.
+    // Only present on the cross-user by-color/feed listings — the owner's
+    // own /artworks doesn't join users, since every row there is already theirs.
     authorName: row.author_name ?? undefined,
     photoUri: `/artworks/${row.id}/photo`,
     photoAspect: row.photo_aspect ?? undefined,
     caption: row.caption,
-    colors: row.colors,
+    colors: row.colors.map((c) => ({ ...c, artworkCount: counts.get(c.hex.toUpperCase()) ?? 0 })),
     createdAt: +row.created_at,
   };
 }
@@ -958,11 +958,11 @@ app.get(
   requireAuth(),
   asyncRoute(async (req, res) => {
     const user = await ensureUser(getAuth(req).userId);
-    const result = await pool.query(
-      'select * from artworks where user_id = $1 order by created_at desc',
-      [user.id]
-    );
-    res.json(result.rows.map(artworkRow));
+    const [result, counts] = await Promise.all([
+      pool.query('select * from artworks where user_id = $1 order by created_at desc', [user.id]),
+      artworkCountsByHex(),
+    ]);
+    res.json(result.rows.map((row) => artworkRow(row, counts)));
   })
 );
 
@@ -977,19 +977,22 @@ app.get(
     const hex = normalizeHex(req.params.hex);
     if (!hex) return res.status(400).json({ error: 'not a valid hex color' });
 
-    const result = await pool.query(
-      `select a.*, u.name as author_name
-         from artworks a
-         join users u on u.id = a.user_id
-        where exists (
-                select 1 from jsonb_array_elements(a.colors) elem
-                 where upper(elem->>'hex') = $1
-              )
-        order by a.created_at desc
-        limit 200`,
-      [hex] // stored colors keep the '#', e.g. "#AABBCC" — matches artworkCountsByHex()'s keys
-    );
-    res.json(result.rows.map(artworkRow));
+    const [result, counts] = await Promise.all([
+      pool.query(
+        `select a.*, u.name as author_name
+           from artworks a
+           join users u on u.id = a.user_id
+          where exists (
+                  select 1 from jsonb_array_elements(a.colors) elem
+                   where upper(elem->>'hex') = $1
+                )
+          order by a.created_at desc
+          limit 200`,
+        [hex] // stored colors keep the '#', e.g. "#AABBCC" — matches artworkCountsByHex()'s keys
+      ),
+      artworkCountsByHex(),
+    ]);
+    res.json(result.rows.map((row) => artworkRow(row, counts)));
   })
 );
 
@@ -999,14 +1002,17 @@ app.get(
   '/artworks/feed',
   requireAuth(),
   asyncRoute(async (req, res) => {
-    const result = await pool.query(`
-      select a.*, u.name as author_name
-        from artworks a
-        join users u on u.id = a.user_id
-       order by a.created_at desc
-       limit 200
-    `);
-    res.json(result.rows.map(artworkRow));
+    const [result, counts] = await Promise.all([
+      pool.query(`
+        select a.*, u.name as author_name
+          from artworks a
+          join users u on u.id = a.user_id
+         order by a.created_at desc
+         limit 200
+      `),
+      artworkCountsByHex(),
+    ]);
+    res.json(result.rows.map((row) => artworkRow(row, counts)));
   })
 );
 
@@ -1053,14 +1059,17 @@ app.post(
       })
     );
 
+    // Sequenced, not Promise.all'd: artworkCountsByHex() has to run after the
+    // insert commits, or it can race and miss counting this very artwork.
     const inserted = await pool.query(
       `insert into artworks (id, user_id, photo_key, photo_aspect, caption, colors)
        values ($1,$2,$3,$4,$5,$6)
        returning *`,
       [id, user.id, photoKey, photoAspect, caption, JSON.stringify(colors)]
     );
+    const counts = await artworkCountsByHex();
 
-    res.status(201).json(artworkRow(inserted.rows[0]));
+    res.status(201).json(artworkRow(inserted.rows[0], counts));
   })
 );
 

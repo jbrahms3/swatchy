@@ -1,6 +1,8 @@
 import { Image } from 'expo-image';
-import { StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { ArtworkDetailModal } from '@/components/ArtworkDetailModal';
 import { hexToRgb, readableOn } from '@/lib/color';
 import type { Artwork, ArtworkColor } from '@/lib/store';
 import { T, radius } from '@/lib/theme';
@@ -9,9 +11,11 @@ import { timeAgo } from '@/lib/time';
 /**
  * A submitted piece of artwork, presented on the home feed the same way a
  * claimed-color post is: header, photo, then what makes it worth looking
- * at — here, the colors it's tagged with instead of one swatch band.
+ * at — here, the colors it's tagged with instead of one swatch band. Tap
+ * the photo or the colors to expand it (see ArtworkDetailModal).
  */
 export function ArtworkFeedCard({ artwork }: { artwork: Artwork }) {
+  const [showDetail, setShowDetail] = useState(false);
   const authorName = artwork.authorName ?? 'Someone';
   const accent = artwork.colors[0]?.hex ?? T.surfaceHi;
   const ink = readableOn(hexToRgb(accent));
@@ -31,24 +35,31 @@ export function ArtworkFeedCard({ artwork }: { artwork: Artwork }) {
         </View>
       </View>
 
-      <View style={[styles.media, { aspectRatio: artwork.photoAspect ?? 1 }]}>
-        <Image
-          source={{ uri: artwork.photoUri }}
-          style={StyleSheet.absoluteFill}
-          contentFit="cover"
-          transition={180}
-        />
-      </View>
-
-      {artwork.colors.length > 0 && (
-        <View style={styles.colors}>
-          {artwork.colors.map((c: ArtworkColor) => (
-            <View key={c.hex} style={[styles.dot, { backgroundColor: c.hex }]} />
-          ))}
+      <Pressable
+        onPress={() => setShowDetail(true)}
+        accessibilityRole="button"
+        accessibilityLabel="Expand this artwork and see its tagged colors">
+        <View style={[styles.media, { aspectRatio: artwork.photoAspect ?? 1 }]}>
+          <Image
+            source={{ uri: artwork.photoUri }}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+            transition={180}
+          />
         </View>
-      )}
+
+        {artwork.colors.length > 0 && (
+          <View style={styles.colors}>
+            {artwork.colors.map((c: ArtworkColor) => (
+              <View key={c.hex} style={[styles.dot, { backgroundColor: c.hex }]} />
+            ))}
+          </View>
+        )}
+      </Pressable>
 
       {!!artwork.caption && <Text style={styles.caption}>{artwork.caption}</Text>}
+
+      <ArtworkDetailModal artwork={showDetail ? artwork : null} onClose={() => setShowDetail(false)} />
     </View>
   );
 }
