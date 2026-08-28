@@ -925,8 +925,32 @@ app.get(
   })
 );
 
+// Every color anyone has actually added to the app — saved to their
+// collection, or claimed and posted — deduped by hex. Backs client-side
+// artwork auto-tagging (src/lib/colorExtract.ts matches a photo against
+// this list rather than inventing colors from the photo itself), so it
+// deliberately excludes artworks.colors: those are already the *result*
+// of that matching, not something a person typed in or claimed themselves.
+app.get(
+  '/colors/catalog',
+  requireAuth(),
+  asyncRoute(async (req, res) => {
+    const result = await pool.query(`
+      select distinct on (upper(hex)) upper(hex) as hex, name
+        from (
+          select hex, name, created_at from saved_swatches
+          union all
+          select swatch_hex as hex, swatch_name as name, created_at from posts
+        ) claimed
+       order by upper(hex), created_at desc
+       limit 3000
+    `);
+    res.json(result.rows);
+  })
+);
+
 // Mirrors MAX_EXTRACTED_COLORS in src/lib/colorExtract.ts — the client
-// auto-tags a photo with its most prominent colors, up to this many.
+// auto-tags a photo with colors from the catalog above, up to this many.
 const MAX_ARTWORK_COLORS = 25;
 
 app.get(
