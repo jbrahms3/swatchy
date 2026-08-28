@@ -85,7 +85,16 @@ export type WeeklyQueue = {
   queued: QueuedPalette[];
 };
 
-export type ArtworkColor = { name: string; hex: string };
+export type ArtworkColor = {
+  name: string;
+  hex: string;
+  /**
+   * How many artworks (across everyone) are tagged with this hex — present
+   * on colors read back from the server, absent on ones you're about to
+   * submit (the server derives it, it's never something a client sends).
+   */
+  artworkCount?: number;
+};
 
 export type Artwork = {
   id: string;
