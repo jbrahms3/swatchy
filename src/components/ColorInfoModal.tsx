@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { describe, hexToRgb, readableOn, rgbToHsl } from '@/lib/color';
@@ -24,6 +24,12 @@ type Props = {
  * and — since this color came from the shared catalog, not a one-off pick —
  * how many other artworks are tagged with it, linking through to the full
  * list. Opened by tapping a color chip in ArtworkDetailModal.
+ *
+ * Deliberately NOT its own <Modal>: this is always opened from inside
+ * ArtworkDetailModal's Modal, and a second native Modal nested inside a
+ * first one doesn't reliably show or take touches (most visible on
+ * Android). Rendered as a plain full-screen overlay instead, so there's
+ * only ever one real Modal in play.
  */
 export function ColorInfoModal({ color, onClose }: Props) {
   const router = useRouter();
@@ -44,61 +50,59 @@ export function ColorInfoModal({ color, onClose }: Props) {
   };
 
   return (
-    <Modal visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <View style={styles.root}>
-        <Pressable
-          onPress={onClose}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-          style={[styles.close, { top: insets.top + 10 }]}>
-          <Ionicons name="close" size={22} color={T.text} />
-        </Pressable>
+    <View style={styles.root}>
+      <Pressable
+        onPress={onClose}
+        hitSlop={12}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+        style={[styles.close, { top: insets.top + 10 }]}>
+        <Ionicons name="close" size={22} color={T.text} />
+      </Pressable>
 
-        <ScrollView
-          contentContainerStyle={[
-            styles.scroll,
-            { paddingTop: insets.top + 56, paddingBottom: insets.bottom + 28 },
-          ]}
-          showsVerticalScrollIndicator={false}>
-          <View style={styles.chip}>
-            <View style={[styles.colorSegment, { backgroundColor: color.hex }]}>
-              <Text style={[styles.name, { color: ink }]} numberOfLines={2}>
-                {color.name}
-              </Text>
-            </View>
-
-            <View style={styles.paper}>
-              <Text style={styles.label}>COLOR</Text>
-              <Text style={styles.hex}>{color.hex}</Text>
-              <Text style={styles.describe}>{describe(rgb)}</Text>
-
-              <View style={styles.statsBlock}>
-                <ValueRow label="RGB" value={`${rgb.r}, ${rgb.g}, ${rgb.b}`} />
-                <ValueRow label="HSL" value={`${hsl.h}°, ${hsl.s}%, ${hsl.l}%`} />
-              </View>
-
-              <Pressable
-                onPress={count > 0 ? seeArtworks : undefined}
-                disabled={count === 0}
-                accessibilityRole={count > 0 ? 'link' : undefined}
-                accessibilityLabel={
-                  count > 0 ? `See the ${count} artworks tagged with this color` : undefined
-                }
-                style={({ pressed }) => [styles.taggedRow, { opacity: pressed ? 0.6 : 1 }]}>
-                <Ionicons name="brush" size={14} color={PAPER_INK} />
-                <Text style={styles.taggedText}>
-                  {count > 0
-                    ? `Tagged in ${count} ${count === 1 ? 'artwork' : 'artworks'}`
-                    : 'Not tagged in any other artwork yet'}
-                </Text>
-                {count > 0 && <Ionicons name="chevron-forward" size={14} color={PAPER_DIM} />}
-              </Pressable>
-            </View>
+      <ScrollView
+        contentContainerStyle={[
+          styles.scroll,
+          { paddingTop: insets.top + 56, paddingBottom: insets.bottom + 28 },
+        ]}
+        showsVerticalScrollIndicator={false}>
+        <View style={styles.chip}>
+          <View style={[styles.colorSegment, { backgroundColor: color.hex }]}>
+            <Text style={[styles.name, { color: ink }]} numberOfLines={2}>
+              {color.name}
+            </Text>
           </View>
-        </ScrollView>
-      </View>
-    </Modal>
+
+          <View style={styles.paper}>
+            <Text style={styles.label}>COLOR</Text>
+            <Text style={styles.hex}>{color.hex}</Text>
+            <Text style={styles.describe}>{describe(rgb)}</Text>
+
+            <View style={styles.statsBlock}>
+              <ValueRow label="RGB" value={`${rgb.r}, ${rgb.g}, ${rgb.b}`} />
+              <ValueRow label="HSL" value={`${hsl.h}°, ${hsl.s}%, ${hsl.l}%`} />
+            </View>
+
+            <Pressable
+              onPress={count > 0 ? seeArtworks : undefined}
+              disabled={count === 0}
+              accessibilityRole={count > 0 ? 'link' : undefined}
+              accessibilityLabel={
+                count > 0 ? `See the ${count} artworks tagged with this color` : undefined
+              }
+              style={({ pressed }) => [styles.taggedRow, { opacity: pressed ? 0.6 : 1 }]}>
+              <Ionicons name="brush" size={14} color={PAPER_INK} />
+              <Text style={styles.taggedText}>
+                {count > 0
+                  ? `Tagged in ${count} ${count === 1 ? 'artwork' : 'artworks'}`
+                  : 'Not tagged in any other artwork yet'}
+              </Text>
+              {count > 0 && <Ionicons name="chevron-forward" size={14} color={PAPER_DIM} />}
+            </Pressable>
+          </View>
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -112,7 +116,9 @@ function ValueRow({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+  // Absolute + a solid background: this sits inside ArtworkDetailModal's
+  // own Modal, on top of its ScrollView, and needs to fully cover it.
+  root: { ...StyleSheet.absoluteFillObject, backgroundColor: T.bg, zIndex: 10, elevation: 10 },
   close: {
     position: 'absolute',
     right: 16,
