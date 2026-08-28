@@ -30,12 +30,15 @@ const BUCKET_STEP = 32;
 const MIN_PIXEL_SHARE = 0.002;
 
 // How close (CIE94) a photo bucket has to land to a catalog color before
-// it counts as that color actually appearing in the artwork. Looser than a
-// just-noticeable difference (~1-3): a photo's lighting and a camera's
-// color science routinely push the same real-world color this far from
-// whatever hex someone typed in when they saved or claimed it. Tighter
-// than this and most real photos would match nothing at all.
-const MATCH_DELTA_E = 14;
+// it counts as that color actually appearing in the artwork. Set tight on
+// purpose — a synthetic test against a painting-like photo (broad,
+// continuously blended color fields, no exact catalog matches) found 14
+// tagged 4 of 6 unrelated catalog colors just because some blended pixel
+// region happened to land within that tolerance of them. At 5, only a
+// color genuinely close to a catalog entry counts, at the cost of some
+// real matches being missed when a photo's lighting pushes a color
+// further than this from whatever hex was originally saved or claimed.
+const MATCH_DELTA_E = 5;
 
 // Extraction only needs enough pixels to get frequency statistics right,
 // not point-sample precision — a small decode keeps this fast on-device.
