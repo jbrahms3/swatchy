@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { ColorBand } from '@/components/ColorBand';
 import { PhotoDetailModal } from '@/components/PhotoDetailModal';
 import { readableOn, hexToRgb } from '@/lib/color';
 import { useStore, type Post } from '@/lib/store';
@@ -33,10 +34,6 @@ export function PostCard({ post }: { post: Post }) {
 
   const swatch = post.swatch;
   const ink = readableOn(hexToRgb(swatch.hex));
-  // The band's background is whatever color it's showing, so the badge
-  // needs a knockout treatment that stays legible against any of them — a
-  // tint of whichever ink color already reads clearly there.
-  const badgeTint = ink === '#FFFFFF' ? 'rgba(255,255,255,0.24)' : 'rgba(17,17,17,0.14)';
 
   return (
     <View style={styles.card}>
@@ -101,42 +98,22 @@ export function PostCard({ post }: { post: Post }) {
         accessibilityLabel={
           canLocate ? `${swatch.name}. Press and hold to see where on the photo it's from.` : undefined
         }
-        style={[
-          styles.band,
-          { backgroundColor: swatch.hex },
-          !post.photoUri && styles.bandHero,
-          holding && styles.bandHolding,
-        ]}>
-        <View style={styles.bandRow}>
-          <View style={styles.bandShrink}>
-            <Text style={[styles.bandName, { color: ink }]} numberOfLines={1}>
-              {swatch.name}
-            </Text>
-            <Text style={[styles.bandHex, { color: ink }]}>{swatch.hex}</Text>
-          </View>
-
-          <View style={styles.bandRight}>
-            {swatch.artworkCount > 0 && (
-              <Pressable
-                onPress={() =>
-                  router.push({
-                    pathname: '/color-artworks',
-                    params: { hex: swatch.hex, name: swatch.name, count: String(swatch.artworkCount) },
-                  })
-                }
-                hitSlop={8}
-                accessibilityRole="link"
-                accessibilityLabel={`Tagged in ${swatch.artworkCount} ${
-                  swatch.artworkCount === 1 ? 'artwork' : 'artworks'
-                }. See them.`}
-                style={[styles.taggedBadge, { backgroundColor: badgeTint }]}>
-                <Ionicons name="brush" size={13} color={ink} />
-                <Text style={[styles.taggedCount, { color: ink }]}>{swatch.artworkCount}</Text>
-              </Pressable>
-            )}
-            {canLocate && <Ionicons name="locate-outline" size={18} color={ink} style={styles.bandHint} />}
-          </View>
-        </View>
+        style={holding && styles.bandHolding}>
+        <ColorBand
+          name={swatch.name}
+          hex={swatch.hex}
+          artworkCount={swatch.artworkCount}
+          hero={!post.photoUri}
+          onPressTagged={() =>
+            router.push({
+              pathname: '/color-artworks',
+              params: { hex: swatch.hex, name: swatch.name, count: String(swatch.artworkCount) },
+            })
+          }
+          rightExtra={
+            canLocate ? <Ionicons name="locate-outline" size={18} color={ink} style={styles.bandHint} /> : undefined
+          }
+        />
       </Pressable>
 
       {!!post.caption && <Text style={styles.caption}>{post.caption}</Text>}
@@ -219,40 +196,10 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(0,0,0,0.15)',
   },
 
-  // Full-bleed color band: the width of the card, not a small pill anymore.
-  band: {
-    width: '100%',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    justifyContent: 'center',
-  },
-  // Photo-less (sample) posts have nothing else to show, so the band itself
-  // becomes the card's hero visual instead of a thin strip under a photo.
-  bandHero: { aspectRatio: 1.8, paddingVertical: 20 },
+  // Dims the band slightly while press-and-hold is revealing the photo
+  // marker — ColorBand itself owns the rest of the band's look now.
   bandHolding: { opacity: 0.85 },
-  bandRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  bandShrink: { flexShrink: 1 },
-  bandRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   bandHint: { opacity: 0.7 },
-  bandName: { fontSize: 20, fontWeight: '800', letterSpacing: -0.3 },
-  bandHex: {
-    fontSize: 13,
-    fontWeight: '600',
-    marginTop: 2,
-    opacity: 0.85,
-    fontVariant: ['tabular-nums'],
-  },
-  // A stat, not a footnote: its own pill so it reads as a real number
-  // rather than trailing text competing with the hex for attention.
-  taggedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    height: 30,
-    paddingHorizontal: 11,
-    borderRadius: radius.pill,
-  },
-  taggedCount: { fontSize: 14, fontWeight: '800', fontVariant: ['tabular-nums'] },
 
   caption: {
     color: T.textDim,
