@@ -1,6 +1,5 @@
 import { useClerk } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { type ReactNode, useEffect, useState } from 'react';
 import {
@@ -15,11 +14,12 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ArtworkCard } from '@/components/ArtworkCard';
 import { PostCard } from '@/components/PostCard';
 import { SwatchChip } from '@/components/SwatchChip';
 import { SwatchEditor } from '@/components/SwatchEditor';
 import { hexToRgb, readableOn } from '@/lib/color';
-import { useStore, type Artwork, type ArtworkColor, type Swatch } from '@/lib/store';
+import { useStore, type Swatch } from '@/lib/store';
 import { FAB_CLEARANCE, T, radius } from '@/lib/theme';
 
 const GUTTER = 16;
@@ -267,24 +267,6 @@ function SegmentButton({
   );
 }
 
-function ArtworkCard({ artwork }: { artwork: Artwork }) {
-  return (
-    <View style={styles.artworkCard}>
-      <View style={[styles.artworkPhoto, { aspectRatio: artwork.photoAspect ?? 1 }]}>
-        <Image source={{ uri: artwork.photoUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
-      </View>
-      {artwork.colors.length > 0 && (
-        <View style={styles.artworkColors}>
-          {artwork.colors.map((c: ArtworkColor) => (
-            <View key={c.hex} style={[styles.artworkDot, { backgroundColor: c.hex }]} />
-          ))}
-        </View>
-      )}
-      {!!artwork.caption && <Text style={styles.artworkCaption}>{artwork.caption}</Text>}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: T.bg },
   identity: { paddingHorizontal: GUTTER, alignItems: 'center', paddingVertical: 12 },
@@ -354,23 +336,6 @@ const styles = StyleSheet.create({
   uploadArtworkText: { color: T.text, fontSize: 14, fontWeight: '700' },
 
   artworkList: { gap: 14 },
-  artworkCard: {
-    backgroundColor: T.surface,
-    borderRadius: radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: T.border,
-    overflow: 'hidden',
-  },
-  artworkPhoto: { width: '100%', backgroundColor: T.surfaceHi },
-  artworkColors: { flexDirection: 'row', gap: 6, padding: 12, flexWrap: 'wrap' },
-  artworkDot: {
-    width: 20,
-    height: 20,
-    borderRadius: radius.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.16)',
-  },
-  artworkCaption: { color: T.textDim, fontSize: 13, lineHeight: 18, paddingHorizontal: 12, paddingBottom: 12 },
 
   grid: {
     flexDirection: 'row',

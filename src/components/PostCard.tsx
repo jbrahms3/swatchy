@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -13,6 +14,7 @@ import { timeAgo } from '@/lib/time';
 const PHOTO_MARKER_SIZE = 24;
 
 export function PostCard({ post }: { post: Post }) {
+  const router = useRouter();
   const { toggleLike, deletePost } = useStore();
   const [holding, setHolding] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
@@ -106,12 +108,24 @@ export function PostCard({ post }: { post: Post }) {
             <Text style={[styles.bandName, { color: ink }]} numberOfLines={1}>
               {swatch.name}
             </Text>
-            <Text style={[styles.bandHex, { color: ink }]}>
-              {swatch.hex}
-              {swatch.artworkCount > 0
-                ? ` · in ${swatch.artworkCount} ${swatch.artworkCount === 1 ? 'artwork' : 'artworks'}`
-                : ''}
-            </Text>
+            <Text style={[styles.bandHex, { color: ink }]}>{swatch.hex}</Text>
+            {swatch.artworkCount > 0 && (
+              <Pressable
+                onPress={() =>
+                  router.push({
+                    pathname: '/color-artworks',
+                    params: { hex: swatch.hex, name: swatch.name, count: String(swatch.artworkCount) },
+                  })
+                }
+                hitSlop={8}
+                accessibilityRole="link"
+                accessibilityLabel={`See the artwork tagged with ${swatch.name}`}
+                style={styles.bandTaggedRow}>
+                <Text style={[styles.bandTagged, { color: ink }]}>
+                  Tagged {swatch.artworkCount} {swatch.artworkCount === 1 ? 'time' : 'times'}
+                </Text>
+              </Pressable>
+            )}
           </View>
           {canLocate && <Ionicons name="locate-outline" size={18} color={ink} style={styles.bandHint} />}
         </View>
@@ -218,6 +232,13 @@ const styles = StyleSheet.create({
     marginTop: 2,
     opacity: 0.85,
     fontVariant: ['tabular-nums'],
+  },
+  bandTaggedRow: { alignSelf: 'flex-start', marginTop: 4 },
+  bandTagged: {
+    fontSize: 12,
+    fontWeight: '700',
+    opacity: 0.85,
+    textDecorationLine: 'underline',
   },
 
   caption: {
