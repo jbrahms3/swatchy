@@ -19,7 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/Button';
 import { hexToRgb, readableOn } from '@/lib/color';
-import { extractProminentColorsFromUri } from '@/lib/colorExtract';
+import { matchCatalogColorsFromUri } from '@/lib/colorExtract';
 import { useStore, type ArtworkColor } from '@/lib/store';
 import { T, radius } from '@/lib/theme';
 
@@ -27,14 +27,15 @@ type Photo = { uri: string; width: number; height: number; aspect: number };
 
 /**
  * Upload a piece of artwork. The colors it's tagged with aren't picked by
- * hand — the photo's most prominent colors are auto-detected as soon as
- * it's chosen (see extractProminentColors()), and that's what gets posted.
- * A detected chip can still be removed if it's obviously wrong.
+ * hand — as soon as a photo is chosen, it's matched against the catalog of
+ * colors people have already saved or claimed (see matchCatalogColors()),
+ * and whichever of those actually show up in the photo get posted. A
+ * matched chip can still be removed if it's obviously wrong.
  */
 export default function ArtworkUploadScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { publishArtwork } = useStore();
+  const { loadColorCatalog, publishArtwork } = useStore();
 
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [colors, setColors] = useState<ArtworkColor[]>([]);
@@ -47,7 +48,8 @@ export default function ArtworkUploadScreen() {
     setDetecting(true);
     setDetectError(false);
     try {
-      const found = await extractProminentColorsFromUri(target.uri, target.width, target.height);
+      const catalog = await loadColorCatalog();
+      const found = await matchCatalogColorsFromUri(target.uri, catalog, target.width, target.height);
       setColors(found);
     } catch (err) {
       console.error('[artwork-upload] Failed to detect colors', err);
@@ -153,8 +155,8 @@ export default function ArtworkUploadScreen() {
           </View>
           <Text style={styles.chooserTitle}>Show off what you made</Text>
           <Text style={styles.chooserBody}>
-            Upload a photo of your artwork — its most prominent colors get tagged
-            automatically.
+            Upload a photo of your artwork — it gets tagged automatically with any colors from
+            the community palette that show up in it.
           </Text>
 
           <View style={styles.chooserActions}>
@@ -176,13 +178,13 @@ export default function ArtworkUploadScreen() {
           <View style={styles.panel}>
             <View style={styles.panelHead}>
               <Text style={styles.panelLabel}>
-                Detected colors {colors.length > 0 ? `(${colors.length})` : ''}
+                Matched colors {colors.length > 0 ? `(${colors.length})` : ''}
               </Text>
               {detecting && <ActivityIndicator size="small" color={T.textDim} />}
             </View>
 
             {detecting ? (
-              <Text style={styles.empty}>Picking out the most prominent colors…</Text>
+              <Text style={styles.empty}>Checking against the community palette…</Text>
             ) : detectError ? (
               <>
                 <Text style={styles.empty}>Couldn't read colors from that photo.</Text>
@@ -196,7 +198,9 @@ export default function ArtworkUploadScreen() {
                 </Pressable>
               </>
             ) : colors.length === 0 ? (
-              <Text style={styles.empty}>No distinct colors stood out in that photo.</Text>
+              <Text style={styles.empty}>
+                None of the community's existing colors showed up in that photo.
+              </Text>
             ) : (
               <View style={styles.swatchWrap}>
                 {colors.map((c) => (

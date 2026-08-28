@@ -183,6 +183,8 @@ export type Store = {
   deleteArtwork(id: string): Promise<void>;
   /** Every artwork (anyone's) tagged with this hex, newest first — backs the "tagged N times" link. */
   loadArtworksByColor(hex: string): Promise<Artwork[]>;
+  /** Every color anyone's saved or claimed, deduped by hex — what artwork uploads get auto-tagged against. */
+  loadColorCatalog(): Promise<ArtworkColor[]>;
 };
 
 export function useStoreState(): Store {
@@ -424,6 +426,8 @@ export function useStoreState(): Store {
     [api]
   );
 
+  const loadColorCatalog = useCallback(() => api.get<ArtworkColor[]>('/colors/catalog'), [api]);
+
   const myPosts = useMemo(() => posts.filter((p) => p.mine), [posts]);
 
   return {
@@ -453,6 +457,7 @@ export function useStoreState(): Store {
     publishArtwork,
     deleteArtwork,
     loadArtworksByColor,
+    loadColorCatalog,
   };
 }
 

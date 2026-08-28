@@ -1,18 +1,20 @@
 /**
- * Picks the most prominent colors out of a photo, for auto-tagging artwork
- * uploads. Two passes over the decoded pixels:
+ * Auto-tags an artwork upload with the colors from the community's existing
+ * palette — everything anyone has ever saved or claimed — that actually show
+ * up in the photo. Two passes over the decoded pixels:
  *
  *  1. Bucket every pixel into a coarse RGB grid and tally each bucket's
  *     pixel count — cheap, and frequency is exactly "how much of the photo
  *     is this color".
- *  2. Walk buckets by count, richest first, keeping one candidate only if
- *     it's perceptually distinct (CIE94) from every color already kept —
- *     otherwise a smooth gradient (sky, skin, a shadow falling across one
- *     surface) fills the result with near-duplicates of its dominant hue
- *     instead of surfacing what else is in the photo.
+ *  2. Walk buckets by count, richest first, and for each one large enough to
+ *     be a real area (not noise) find its nearest catalog color. Within a
+ *     perceptual tolerance (CIE94), that counts as a match — outside it,
+ *     the bucket isn't tagged as anything, on purpose: only colors that
+ *     already exist in the catalog ever get applied, nothing invented from
+ *     the photo itself.
  */
 
-import { deltaE94, rgbToLab, suggestName, type RGB } from './color';
+import { deltaE94, hexToRgb, rgbToLab, type RGB } from './color';
 import type { Bitmap } from './png';
 
 export const MAX_EXTRACTED_COLORS = 25;
@@ -24,24 +26,22 @@ const BUCKET_STEP = 32;
 
 // Below this share of the photo's pixels, a bucket reads as noise (a few
 // stray pixels along an edge) rather than a color actually present in the
-// artwork — skip it even if there's room left for more colors.
+// artwork — skip it even if there's room left for more matches.
 const MIN_PIXEL_SHARE = 0.002;
 
-// How far apart two colors need to be (CIE94, roughly "3" is a just-
-// noticeable difference to the eye) before both count as distinct results
-// rather than the same color picked twice.
-const MIN_DISTINCT_DELTA_E = 9;
+// How close (CIE94) a photo bucket has to land to a catalog color before
+// it counts as that color actually appearing in the artwork. Looser than a
+// just-noticeable difference (~1-3): a photo's lighting and a camera's
+// color science routinely push the same real-world color this far from
+// whatever hex someone typed in when they saved or claimed it. Tighter
+// than this and most real photos would match nothing at all.
+const MATCH_DELTA_E = 14;
 
 // Extraction only needs enough pixels to get frequency statistics right,
 // not point-sample precision — a small decode keeps this fast on-device.
 const EXTRACT_MAX_EDGE = 200;
 
 export type ExtractedColor = { name: string; hex: string };
-
-function toHex({ r, g, b }: RGB): string {
-  const c = (n: number) => Math.round(n).toString(16).padStart(2, '0');
-  return `#${c(r)}${c(g)}${c(b)}`.toUpperCase();
-}
 
 /** Buckets every opaque pixel in `bitmap` and returns each bucket's average color, richest first. */
 function bucketByFrequency(bitmap: Bitmap): { color: RGB; count: number }[] {
@@ -78,36 +78,54 @@ function bucketByFrequency(bitmap: Bitmap): { color: RGB; count: number }[] {
 }
 
 /**
- * The photo's most prominent colors, most-to-least prominent, up to
- * `maxColors`. Named the same way any other color in the app is (nearest
- * CSS keyword) so an auto-tagged artwork reads no differently from one
- * tagged by hand.
+ * Which of `catalog`'s colors actually appear in `bitmap`, most-prominent
+ * match first, up to `maxColors`. A match is tagged with the catalog's own
+ * name and hex — not the photo's raw sampled pixel — so the result is
+ * always one of the colors that was actually passed in.
  */
-export function extractProminentColors(bitmap: Bitmap, maxColors = MAX_EXTRACTED_COLORS): ExtractedColor[] {
+export function matchCatalogColors(
+  bitmap: Bitmap,
+  catalog: ExtractedColor[],
+  maxColors = MAX_EXTRACTED_COLORS
+): ExtractedColor[] {
+  if (catalog.length === 0) return [];
+
   const ranked = bucketByFrequency(bitmap);
   const totalPixels = ranked.reduce((sum, b) => sum + b.count, 0);
   if (totalPixels === 0) return [];
 
-  const kept: RGB[] = [];
-  const keptLab: ReturnType<typeof rgbToLab>[] = [];
+  const catalogLab = catalog.map((entry) => ({ entry, lab: rgbToLab(hexToRgb(entry.hex)) }));
+  const matchedHex = new Set<string>();
+  const matches: ExtractedColor[] = [];
 
   for (const { color, count } of ranked) {
-    if (kept.length >= maxColors) break;
+    if (matches.length >= maxColors) break;
     if (count / totalPixels < MIN_PIXEL_SHARE) break; // ranked descending, so nothing after this clears it either
 
     const lab = rgbToLab(color);
-    if (keptLab.some((other) => deltaE94(lab, other) < MIN_DISTINCT_DELTA_E)) continue;
+    let best: ExtractedColor | null = null;
+    let bestDelta = Infinity;
+    for (const candidate of catalogLab) {
+      const delta = deltaE94(lab, candidate.lab);
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        best = candidate.entry;
+      }
+    }
 
-    kept.push(color);
-    keptLab.push(lab);
+    if (best && bestDelta < MATCH_DELTA_E && !matchedHex.has(best.hex.toUpperCase())) {
+      matchedHex.add(best.hex.toUpperCase());
+      matches.push(best);
+    }
   }
 
-  return kept.map((color) => ({ name: suggestName(color), hex: toHex(color) }));
+  return matches;
 }
 
-/** Loads a photo and extracts its most prominent colors in one step. */
-export async function extractProminentColorsFromUri(
+/** Loads a photo and matches it against the catalog in one step. */
+export async function matchCatalogColorsFromUri(
   uri: string,
+  catalog: ExtractedColor[],
   srcWidth?: number,
   srcHeight?: number,
   maxColors = MAX_EXTRACTED_COLORS
@@ -116,5 +134,5 @@ export async function extractProminentColorsFromUri(
   // a plain unit test without dragging in expo-image-manipulator.
   const { loadBitmap } = await import('./sampler');
   const bitmap = await loadBitmap(uri, srcWidth, srcHeight, EXTRACT_MAX_EDGE);
-  return extractProminentColors(bitmap, maxColors);
+  return matchCatalogColors(bitmap, catalog, maxColors);
 }
