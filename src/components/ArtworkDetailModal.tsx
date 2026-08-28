@@ -27,58 +27,58 @@ export function ArtworkDetailModal({ artwork, onClose }: Props) {
   if (!artwork) return null;
 
   return (
-    <>
-      <Modal visible animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-        <View style={[styles.root, { paddingTop: insets.top }]}>
-          <View style={styles.topBar}>
-            <Pressable
-              onPress={onClose}
-              hitSlop={12}
-              accessibilityRole="button"
-              accessibilityLabel="Close">
-              <Ionicons name="close" size={26} color={T.text} />
-            </Pressable>
-            <Text style={styles.topTitle}>Artwork</Text>
-            <View style={{ width: 26 }} />
+    <Modal visible animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+      <View style={[styles.root, { paddingTop: insets.top }]}>
+        <View style={styles.topBar}>
+          <Pressable
+            onPress={onClose}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Close">
+            <Ionicons name="close" size={26} color={T.text} />
+          </Pressable>
+          <Text style={styles.topTitle}>Artwork</Text>
+          <View style={{ width: 26 }} />
+        </View>
+
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+          showsVerticalScrollIndicator={false}>
+          <View style={[styles.photoWrap, { aspectRatio: artwork.photoAspect ?? 1 }]}>
+            <Image
+              source={{ uri: artwork.photoUri }}
+              style={StyleSheet.absoluteFill}
+              contentFit="cover"
+            />
           </View>
 
-          <ScrollView
-            contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-            showsVerticalScrollIndicator={false}>
-            <View style={[styles.photoWrap, { aspectRatio: artwork.photoAspect ?? 1 }]}>
-              <Image
-                source={{ uri: artwork.photoUri }}
-                style={StyleSheet.absoluteFill}
-                contentFit="cover"
-              />
-            </View>
+          <View style={styles.body}>
+            <Text style={styles.author}>{artwork.authorName ?? 'You'}</Text>
+            <Text style={styles.time}>{timeAgo(artwork.createdAt)}</Text>
 
-            <View style={styles.body}>
-              <Text style={styles.author}>{artwork.authorName ?? 'You'}</Text>
-              <Text style={styles.time}>{timeAgo(artwork.createdAt)}</Text>
+            {!!artwork.caption && <Text style={styles.caption}>{artwork.caption}</Text>}
 
-              {!!artwork.caption && <Text style={styles.caption}>{artwork.caption}</Text>}
+            <Text style={styles.sectionTitle}>
+              Colors used{artwork.colors.length > 0 ? ` (${artwork.colors.length})` : ''}
+            </Text>
 
-              <Text style={styles.sectionTitle}>
-                Colors used{artwork.colors.length > 0 ? ` (${artwork.colors.length})` : ''}
-              </Text>
+            {artwork.colors.length === 0 ? (
+              <Text style={styles.empty}>Nothing from the community palette showed up in this one.</Text>
+            ) : (
+              <View style={styles.colorWrap}>
+                {artwork.colors.map((c) => (
+                  <ColorChip key={c.hex} color={c} onPress={() => setActiveColor(c)} />
+                ))}
+              </View>
+            )}
+          </View>
+        </ScrollView>
 
-              {artwork.colors.length === 0 ? (
-                <Text style={styles.empty}>Nothing from the community palette showed up in this one.</Text>
-              ) : (
-                <View style={styles.colorWrap}>
-                  {artwork.colors.map((c) => (
-                    <ColorChip key={c.hex} color={c} onPress={() => setActiveColor(c)} />
-                  ))}
-                </View>
-              )}
-            </View>
-          </ScrollView>
-        </View>
-      </Modal>
-
-      <ColorInfoModal color={activeColor} onClose={() => setActiveColor(null)} />
-    </>
+        {/* An overlay, not a second Modal — see the note on ColorInfoModal
+            for why nesting native Modals here doesn't work reliably. */}
+        <ColorInfoModal color={activeColor} onClose={() => setActiveColor(null)} />
+      </View>
+    </Modal>
   );
 }
 
