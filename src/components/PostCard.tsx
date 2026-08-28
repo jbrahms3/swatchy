@@ -33,6 +33,10 @@ export function PostCard({ post }: { post: Post }) {
 
   const swatch = post.swatch;
   const ink = readableOn(hexToRgb(swatch.hex));
+  // The band's background is whatever color it's showing, so the badge
+  // needs a knockout treatment that stays legible against any of them — a
+  // tint of whichever ink color already reads clearly there.
+  const badgeTint = ink === '#FFFFFF' ? 'rgba(255,255,255,0.24)' : 'rgba(17,17,17,0.14)';
 
   return (
     <View style={styles.card}>
@@ -109,6 +113,9 @@ export function PostCard({ post }: { post: Post }) {
               {swatch.name}
             </Text>
             <Text style={[styles.bandHex, { color: ink }]}>{swatch.hex}</Text>
+          </View>
+
+          <View style={styles.bandRight}>
             {swatch.artworkCount > 0 && (
               <Pressable
                 onPress={() =>
@@ -119,15 +126,16 @@ export function PostCard({ post }: { post: Post }) {
                 }
                 hitSlop={8}
                 accessibilityRole="link"
-                accessibilityLabel={`See the artwork tagged with ${swatch.name}`}
-                style={styles.bandTaggedRow}>
-                <Text style={[styles.bandTagged, { color: ink }]}>
-                  Tagged {swatch.artworkCount} {swatch.artworkCount === 1 ? 'time' : 'times'}
-                </Text>
+                accessibilityLabel={`Tagged in ${swatch.artworkCount} ${
+                  swatch.artworkCount === 1 ? 'artwork' : 'artworks'
+                }. See them.`}
+                style={[styles.taggedBadge, { backgroundColor: badgeTint }]}>
+                <Ionicons name="brush" size={13} color={ink} />
+                <Text style={[styles.taggedCount, { color: ink }]}>{swatch.artworkCount}</Text>
               </Pressable>
             )}
+            {canLocate && <Ionicons name="locate-outline" size={18} color={ink} style={styles.bandHint} />}
           </View>
-          {canLocate && <Ionicons name="locate-outline" size={18} color={ink} style={styles.bandHint} />}
         </View>
       </Pressable>
 
@@ -224,6 +232,7 @@ const styles = StyleSheet.create({
   bandHolding: { opacity: 0.85 },
   bandRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   bandShrink: { flexShrink: 1 },
+  bandRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   bandHint: { opacity: 0.7 },
   bandName: { fontSize: 20, fontWeight: '800', letterSpacing: -0.3 },
   bandHex: {
@@ -233,13 +242,17 @@ const styles = StyleSheet.create({
     opacity: 0.85,
     fontVariant: ['tabular-nums'],
   },
-  bandTaggedRow: { alignSelf: 'flex-start', marginTop: 4 },
-  bandTagged: {
-    fontSize: 12,
-    fontWeight: '700',
-    opacity: 0.85,
-    textDecorationLine: 'underline',
+  // A stat, not a footnote: its own pill so it reads as a real number
+  // rather than trailing text competing with the hex for attention.
+  taggedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    height: 30,
+    paddingHorizontal: 11,
+    borderRadius: radius.pill,
   },
+  taggedCount: { fontSize: 14, fontWeight: '800', fontVariant: ['tabular-nums'] },
 
   caption: {
     color: T.textDim,

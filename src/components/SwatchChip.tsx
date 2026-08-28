@@ -19,11 +19,6 @@ export function SwatchChip({ swatch, size = 92, onPress, showHex = true }: Props
         {swatch.name}
       </Text>
       {showHex && <Text style={styles.hex}>{swatch.hex}</Text>}
-      {swatch.artworkCount > 0 && (
-        <Text style={styles.artworkCount} numberOfLines={1}>
-          In {swatch.artworkCount} {swatch.artworkCount === 1 ? 'artwork' : 'artworks'}
-        </Text>
-      )}
     </View>
   );
 
@@ -58,10 +53,5 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 2,
     fontVariant: ['tabular-nums'],
-  },
-  artworkCount: {
-    color: T.textFaint,
-    fontSize: 10,
-    marginTop: 2,
   },
 });
