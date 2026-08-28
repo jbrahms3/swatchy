@@ -1,19 +1,46 @@
+import { useMemo } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ArtworkFeedCard } from '@/components/ArtworkFeedCard';
 import { PostCard } from '@/components/PostCard';
-import { useStore } from '@/lib/store';
+import { useStore, type Artwork, type Post } from '@/lib/store';
 import { FAB_CLEARANCE, T } from '@/lib/theme';
 
+type FeedItem = { key: string; createdAt: number } & (
+  | { kind: 'post'; post: Post }
+  | { kind: 'artwork'; artwork: Artwork }
+);
+
 export default function HomeScreen() {
-  const { posts } = useStore();
+  const { posts, artworkFeed } = useStore();
   const insets = useSafeAreaInsets();
+
+  // Two separate feeds, interleaved by time so the newest of either kind
+  // always leads — a fresh piece of artwork shouldn't wait behind a week
+  // of claimed colors just because it's a different kind of post.
+  const feed = useMemo<FeedItem[]>(() => {
+    const items: FeedItem[] = [
+      ...posts.map((post): FeedItem => ({ kind: 'post', post, key: `post-${post.id}`, createdAt: post.createdAt })),
+      ...artworkFeed.map(
+        (artwork): FeedItem => ({
+          kind: 'artwork',
+          artwork,
+          key: `artwork-${artwork.id}`,
+          createdAt: artwork.createdAt,
+        })
+      ),
+    ];
+    return items.sort((a, b) => b.createdAt - a.createdAt);
+  }, [posts, artworkFeed]);
 
   return (
     <FlatList
-      data={posts}
-      keyExtractor={(post) => post.id}
-      renderItem={({ item }) => <PostCard post={item} />}
+      data={feed}
+      keyExtractor={(item) => item.key}
+      renderItem={({ item }) =>
+        item.kind === 'post' ? <PostCard post={item.post} /> : <ArtworkFeedCard artwork={item.artwork} />
+      }
       style={styles.list}
       contentContainerStyle={[
         styles.content,
@@ -22,14 +49,15 @@ export default function HomeScreen() {
       ListHeaderComponent={
         <View style={styles.header}>
           <Text style={styles.title}>Home</Text>
-          <Text style={styles.subtitle}>Every color claimed on this device</Text>
+          <Text style={styles.subtitle}>Colors claimed and artwork shared by everyone</Text>
         </View>
       }
       ListEmptyComponent={
         <View style={styles.empty}>
-          <Text style={styles.emptyTitle}>Nothing claimed yet</Text>
+          <Text style={styles.emptyTitle}>Nothing here yet</Text>
           <Text style={styles.emptyBody}>
-            Tap “Claim a color”, pick a photo, then press anywhere on it to pull the color out.
+            Tap the button in the corner to claim a color from a photo, or share a piece of
+            artwork.
           </Text>
         </View>
       }

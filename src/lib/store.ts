@@ -143,6 +143,8 @@ export type Store = {
   myPosts: Post[];
   weekly: Weekly | null;
   artworks: Artwork[];
+  /** Everyone's artwork, newest first — what the home feed mixes in with `posts`. */
+  artworkFeed: Artwork[];
 
   renameProfile(name: string): Promise<void>;
   completeOnboarding(): Promise<void>;
@@ -202,14 +204,17 @@ export function useStoreState(): Store {
   const [posts, setPosts] = useState<Post[]>([]);
   const [weekly, setWeekly] = useState<Weekly | null>(null);
   const [artworks, setArtworks] = useState<Artwork[]>([]);
+  const [artworkFeed, setArtworkFeed] = useState<Artwork[]>([]);
 
   const load = useCallback(async () => {
-    const [me, feed] = await Promise.all([
+    const [me, feed, artworkFeedData] = await Promise.all([
       api.get<Profile>('/me'),
       api.get<Post[]>('/posts'),
+      api.get<Artwork[]>('/artworks/feed'),
     ]);
     setProfile(me);
     setPosts(feed.map((p) => withAbsolutePhoto(p, api)));
+    setArtworkFeed(artworkFeedData.map((a) => withAbsoluteArtworkPhoto(a, api)));
   }, [api]);
 
   useEffect(() => {
@@ -405,15 +410,21 @@ export function useStoreState(): Store {
       await appendPhoto(form, photoUri);
 
       const created = await api.post<Artwork>('/artworks', form);
-      setArtworks((all) => [withAbsoluteArtworkPhoto(created, api), ...all]);
+      const absolute = withAbsoluteArtworkPhoto(created, api);
+      setArtworks((all) => [absolute, ...all]);
+      // The own-artwork response doesn't carry authorName (no join needed
+      // for a list that's already all yours) — the feed shows it, so stamp
+      // it in from the profile already in hand rather than refetching.
+      setArtworkFeed((all) => [{ ...absolute, authorName: profile.name }, ...all]);
     },
-    [api]
+    [api, profile.name]
   );
 
   const deleteArtwork = useCallback(
     async (id: string) => {
       await api.del(`/artworks/${id}`);
       setArtworks((all) => all.filter((a) => a.id !== id));
+      setArtworkFeed((all) => all.filter((a) => a.id !== id));
     },
     [api]
   );
@@ -438,6 +449,7 @@ export function useStoreState(): Store {
     myPosts,
     weekly,
     artworks,
+    artworkFeed,
     renameProfile,
     completeOnboarding,
     saveSwatch,

@@ -993,6 +993,23 @@ app.get(
   })
 );
 
+// Everyone's artwork, newest first — what the home feed mixes in alongside
+// claimed-color posts. Same shape/limit as FEED_QUERY below.
+app.get(
+  '/artworks/feed',
+  requireAuth(),
+  asyncRoute(async (req, res) => {
+    const result = await pool.query(`
+      select a.*, u.name as author_name
+        from artworks a
+        join users u on u.id = a.user_id
+       order by a.created_at desc
+       limit 200
+    `);
+    res.json(result.rows.map(artworkRow));
+  })
+);
+
 app.post(
   '/artworks',
   requireAuth(),
