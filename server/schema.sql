@@ -138,3 +138,39 @@ create table if not exists artworks (
 
 create index if not exists artworks_user_id_idx on artworks (user_id);
 create index if not exists artworks_created_at_idx on artworks (created_at desc);
+
+-- "Guess the Color" — a separate, public mini-game on the marketing site
+-- (server/guess.html), not part of the app or its accounts. An admin (a
+-- shared secret, GUESS_ADMIN_KEY — see index.js) queues {name, hex} rounds
+-- ahead of time; the first request on a new UTC day stamps the head of the
+-- queue with that day, same promote-on-first-request pattern as
+-- weekly_palettes. hex stays hidden until the round's day has passed.
+--
+-- No login: whoever's playing is identified only by whatever name they
+-- type. That's a deliberate trade for keeping this open to anyone visiting
+-- the site, not just app users — see color_guess_entries.
+create table if not exists color_guess_rounds (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  hex text not null,
+  day_key text unique,
+  created_at timestamptz not null default now(),
+  went_live_at timestamptz
+);
+
+create index if not exists color_guess_rounds_queue_idx
+  on color_guess_rounds (created_at, id)
+  where day_key is null;
+
+-- One guess per (round, name) — resubmitting under the same name (case-
+-- insensitively) replaces the previous guess rather than adding another.
+create table if not exists color_guess_entries (
+  id uuid primary key default gen_random_uuid(),
+  round_id uuid not null references color_guess_rounds(id) on delete cascade,
+  player_name text not null,
+  guess_hex text not null,
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists color_guess_entries_round_name_idx
+  on color_guess_entries (round_id, lower(player_name));

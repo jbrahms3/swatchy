@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guess the Color — Swatchy</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23C97A3D'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23FBFAF3'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,340..900;1,9..144,340..900&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --paper: #EFF1E9;
+    --paper-alt: #E4E6DC;
+    --ink: #1C1E17;
+    --ink-dim: #64675A;
+    --ink-faint: #8B8E7E;
+    --line: rgba(28, 30, 23, 0.14);
+    --line-strong: rgba(28, 30, 23, 0.24);
+
+    --card-paper: #FBFAF3;
+    --card-ink: #1A1B15;
+    --card-ink-dim: #6C6E60;
+
+    --s-coral: #E2574C;
+    --s-gold: #E8B04B;
+    --s-forest: #3F8F6F;
+    --s-cobalt: #2F6DB0;
+    --s-violet: #8A5FBF;
+    --s-clay: #C97A3D;
+
+    --shadow-chip: 0 20px 44px -22px rgba(20, 22, 15, 0.45);
+    --shadow-soft: 0 10px 30px -18px rgba(20, 22, 15, 0.3);
+    --radius-chip: 16px;
+    --radius-sm: 8px;
+
+    --font-display: 'Fraunces', 'Iowan Old Style', Georgia, serif;
+    --font-body: 'Work Sans', 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #16170F;
+      --paper-alt: #1D1F14;
+      --ink: #F0F0E6;
+      --ink-dim: #9EA08F;
+      --ink-faint: #6E7062;
+      --line: rgba(240, 240, 230, 0.14);
+      --line-strong: rgba(240, 240, 230, 0.24);
+      --shadow-chip: 0 20px 44px -20px rgba(0, 0, 0, 0.65);
+      --shadow-soft: 0 10px 30px -18px rgba(0, 0, 0, 0.55);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 { font-family: var(--font-display); font-weight: 600; margin: 0; text-wrap: balance; color: var(--ink); }
+  p { margin: 0; }
+  a { color: inherit; }
+  a:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--s-cobalt); outline-offset: 3px; border-radius: 3px; }
+
+  .wrap { max-width: 720px; margin: 0 auto; padding: clamp(24px, 6vw, 56px) clamp(20px, 5vw, 32px) 80px; }
+
+  header.top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+  .wordmark { font-family: var(--font-display); font-size: 20px; font-weight: 700; }
+  .wordmark .dot { color: var(--s-coral); }
+  .wordmark a { text-decoration: none; }
+  .eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+
+  h1.title { font-size: clamp(32px, 5vw, 46px); letter-spacing: -0.01em; margin-top: 6px; }
+  .lede { color: var(--ink-dim); font-size: 16px; max-width: 52ch; margin-top: 10px; }
+
+  .card {
+    background: var(--card-paper);
+    color: var(--card-ink);
+    border-radius: var(--radius-chip);
+    box-shadow: var(--shadow-chip);
+    padding: clamp(20px, 4vw, 28px);
+    margin-top: 28px;
+  }
+  .card h2 { font-size: 22px; color: var(--card-ink); }
+  .card .dim { color: var(--card-ink-dim); }
+
+  .name-input, .text-input {
+    font-family: var(--font-body);
+    font-size: 15px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    background: #fff;
+    color: var(--card-ink);
+    width: 100%;
+  }
+
+  .field { margin-top: 16px; }
+  .field label { display: block; font-size: 13px; font-weight: 600; color: var(--card-ink-dim); margin-bottom: 6px; }
+
+  .picker-row { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+  input[type="color"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 56px;
+    height: 56px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    padding: 0;
+    background: none;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+  input[type="color"]::-webkit-color-swatch { border: none; border-radius: var(--radius-sm); }
+
+  .hex-input { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.03em; }
+
+  button.btn {
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 15px;
+    border: none;
+    border-radius: 999px;
+    padding: 12px 22px;
+    cursor: pointer;
+    background: var(--ink);
+    color: var(--paper);
+  }
+  button.btn:disabled { opacity: 0.5; cursor: default; }
+  button.btn.ghost { background: transparent; color: var(--card-ink); border: 1px solid var(--line-strong); }
+
+  .status { margin-top: 12px; font-size: 14px; }
+  .status[data-state="ok"] { color: var(--s-forest); }
+  .status[data-state="error"] { color: var(--s-coral); }
+
+  .guess-preview { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+  .guess-swatch { width: 34px; height: 34px; border-radius: var(--radius-sm); border: 1px solid var(--line-strong); flex-shrink: 0; }
+
+  /* -------------------------------------------------- history -------- */
+  .round { border-top: 1px solid var(--line); padding-top: 18px; margin-top: 18px; }
+  .round:first-child { border-top: none; padding-top: 0; margin-top: 0; }
+  .round-head { display: flex; align-items: center; gap: 12px; }
+  .round-swatch { width: 44px; height: 44px; border-radius: var(--radius-sm); border: 1px solid var(--line-strong); flex-shrink: 0; }
+  .round-name { font-weight: 700; font-size: 17px; }
+  .round-meta { color: var(--card-ink-dim); font-size: 13px; font-family: var(--font-mono); }
+
+  table.board { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px; }
+  table.board th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--card-ink-dim); font-weight: 600; padding-bottom: 6px; }
+  table.board td { padding: 7px 0; border-top: 1px solid var(--line); }
+  table.board td.rank { font-family: var(--font-mono); color: var(--card-ink-dim); width: 28px; }
+  table.board td.swatch-cell { width: 30px; }
+  .mini-swatch { width: 18px; height: 18px; border-radius: 5px; border: 1px solid var(--line-strong); display: inline-block; vertical-align: middle; }
+  table.board td.score { font-family: var(--font-mono); text-align: right; color: var(--card-ink-dim); }
+  table.board tr:first-child td { font-weight: 700; }
+  table.board tr:first-child td.score { color: var(--s-forest); }
+
+  .empty { color: var(--ink-faint); font-size: 14px; padding: 8px 0; }
+
+  /* ---------------------------------------------------- admin -------- */
+  .admin-toggle { margin-top: 40px; text-align: center; }
+  .admin-toggle button { background: none; border: none; color: var(--ink-faint); font-size: 13px; cursor: pointer; text-decoration: underline; font-family: var(--font-body); }
+  #admin-panel { display: none; }
+  #admin-panel.open { display: block; }
+  .queue-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+  .queue-row:first-child { border-top: none; }
+  .queue-swatch { width: 30px; height: 30px; border-radius: 7px; border: 1px solid var(--line-strong); flex-shrink: 0; }
+  .queue-info { flex: 1; min-width: 0; }
+  .queue-name { font-weight: 600; font-size: 14px; }
+  .queue-meta { font-size: 12px; color: var(--card-ink-dim); font-family: var(--font-mono); }
+  .queue-remove { background: none; border: none; color: var(--s-coral); cursor: pointer; font-size: 13px; font-family: var(--font-body); }
+
+  footer.foot { text-align: center; margin-top: 60px; color: var(--ink-faint); font-size: 13px; }
+  footer.foot a { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <span class="wordmark"><a href="/">Swatchy<span class="dot">.</span></a></span>
+    <span class="eyebrow">Guess the Color</span>
+  </header>
+
+  <h1 class="title">What color is that, really?</h1>
+  <p class="lede">
+    Someone names a color without showing it. Everyone else picks their best guess.
+    At the end of the day the real color's revealed, and whoever landed closest wins.
+  </p>
+
+  <div class="card" id="today-card">
+    <h2 id="today-heading">Loading today's color…</h2>
+    <div id="today-body"></div>
+  </div>
+
+  <div class="card" id="history-card" style="display:none;">
+    <h2>Past days</h2>
+    <div id="history-body"><p class="empty">Nothing's been revealed yet.</p></div>
+  </div>
+
+  <div class="admin-toggle">
+    <button type="button" id="admin-open">Admin</button>
+  </div>
+
+  <div class="card" id="admin-panel">
+    <h2>Queue a color</h2>
+    <p class="dim">Name it without giving it away. One goes live automatically every midnight UTC, in the order queued.</p>
+
+    <div class="field">
+      <label for="admin-key-input">Admin key</label>
+      <input class="text-input" id="admin-key-input" type="password" placeholder="Shared admin key" autocomplete="off">
+    </div>
+
+    <div class="field">
+      <label for="admin-name-input">Color name</label>
+      <input class="text-input" id="admin-name-input" placeholder="e.g. &ldquo;A rained-on brick wall at dusk&rdquo;" maxlength="60">
+    </div>
+
+    <div class="field">
+      <label>Color</label>
+      <div class="picker-row">
+        <input type="color" id="admin-color-input" value="#c97a3d">
+        <input class="text-input hex-input" id="admin-hex-input" value="#C97A3D" maxlength="7">
+      </div>
+    </div>
+
+    <div class="field">
+      <button class="btn" id="admin-queue-btn">Add to queue</button>
+    </div>
+    <p class="status" id="admin-status"></p>
+
+    <div id="admin-today" style="margin-top:22px;"></div>
+
+    <h2 style="margin-top:28px; font-size:18px;">Up next</h2>
+    <div id="admin-queue-list"><p class="empty">Nothing queued.</p></div>
+  </div>
+
+  <footer class="foot">Part of <a href="/">Swatchy</a>. No account needed — you're just whatever name you type.</footer>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var STORAGE_NAME = 'guess_player_name';
+  var STORAGE_ADMIN_KEY = 'guess_admin_key';
+
+  function $(id) { return document.getElementById(id); }
+  function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+  function normalizeHex(input) {
+    var raw = String(input || '').trim().replace(/^#/, '');
+    if (!/^([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(raw)) return null;
+    var full = raw.length === 3 ? raw.replace(/./g, function (c) { return c + c; }) : raw;
+    return '#' + full.toUpperCase();
+  }
+  function api(path, opts) {
+    opts = opts || {};
+    var headers = Object.assign({}, opts.headers || {});
+    if (opts.body) headers['Content-Type'] = 'application/json';
+    return fetch(path, {
+      method: opts.method || 'GET',
+      headers: headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    }).then(function (res) {
+      return res.json().catch(function () { return null; }).then(function (json) {
+        if (!res.ok) throw new Error((json && json.error) || (res.status + ' ' + res.statusText));
+        return json;
+      });
+    });
+  }
+
+  /* --------------------------------------------- today's color ------ */
+
+  var playerName = localStorage.getItem(STORAGE_NAME) || '';
+
+  function renderTodayLoaded(today, myGuessHex) {
+    $('today-heading').textContent = today.name ? today.name : 'No color today';
+    if (!today.name) {
+      $('today-body').innerHTML = '<p class="dim">Nothing’s been queued for today yet — check back soon.</p>';
+      return;
+    }
+
+    var guessedHtml = myGuessHex
+      ? '<div class="guess-preview"><span class="guess-swatch" style="background:' + esc(myGuessHex) + '"></span>' +
+        '<span class="dim">Your guess so far: <strong style="font-family:var(--font-mono)">' + esc(myGuessHex) + '</strong> — change it any time before the day ends.</span></div>'
+      : '';
+
+    $('today-body').innerHTML =
+      '<p class="dim">Pick your best guess for what this color actually looks like.</p>' +
+      guessedHtml +
+      '<div class="field"><label for="name-input">Your name</label>' +
+      '<input class="name-input" id="name-input" maxlength="40" placeholder="What should we call you?" value="' + esc(playerName) + '"></div>' +
+      '<div class="field"><label>Your guess</label>' +
+      '<div class="picker-row">' +
+      '<input type="color" id="color-input" value="' + (myGuessHex || '#C97A3D') + '">' +
+      '<input class="text-input hex-input" id="hex-input" value="' + (myGuessHex || '#C97A3D') + '" maxlength="7">' +
+      '</div></div>' +
+      '<div class="field"><button class="btn" id="submit-btn">' + (myGuessHex ? 'Update guess' : 'Submit guess') + '</button></div>' +
+      '<p class="status" id="submit-status"></p>';
+
+    var colorInput = $('color-input');
+    var hexInput = $('hex-input');
+    colorInput.addEventListener('input', function () { hexInput.value = colorInput.value.toUpperCase(); });
+    hexInput.addEventListener('input', function () {
+      var norm = normalizeHex(hexInput.value);
+      if (norm) colorInput.value = norm;
+    });
+
+    $('submit-btn').addEventListener('click', function () {
+      var name = $('name-input').value.trim();
+      var hex = normalizeHex(hexInput.value);
+      var status = $('submit-status');
+      if (!name) { status.dataset.state = 'error'; status.textContent = 'Enter a name first.'; return; }
+      if (!hex) { status.dataset.state = 'error'; status.textContent = 'That’s not a valid color.'; return; }
+
+      $('submit-btn').disabled = true;
+      status.dataset.state = '';
+      status.textContent = 'Saving…';
+
+      api('/guess/submit', { method: 'POST', body: { name: name, hex: hex } })
+        .then(function () {
+          localStorage.setItem(STORAGE_NAME, name);
+          playerName = name;
+          status.dataset.state = 'ok';
+          status.textContent = 'Got it — good luck!';
+          $('submit-btn').textContent = 'Update guess';
+        })
+        .catch(function (err) {
+          status.dataset.state = 'error';
+          status.textContent = err.message || 'Something went wrong. Try again.';
+        })
+        .finally(function () { $('submit-btn').disabled = false; });
+    });
+  }
+
+  function loadToday() {
+    api('/guess/today')
+      .then(function (today) {
+        var stateUrl = '/guess/state' + (playerName ? '?name=' + encodeURIComponent(playerName) : '');
+        return api(stateUrl).then(function (state) {
+          renderTodayLoaded(today, state.myGuessHex);
+        });
+      })
+      .catch(function () {
+        $('today-heading').textContent = 'Couldn’t load today’s color';
+        $('today-body').innerHTML = '<p class="dim">Something went wrong. Try refreshing.</p>';
+      });
+  }
+
+  /* --------------------------------------------------- history ------- */
+
+  function renderHistory(rounds) {
+    if (!rounds.length) return;
+    $('history-card').style.display = '';
+    $('history-body').innerHTML = rounds.map(function (round) {
+      var rows = round.leaderboard.map(function (e, i) {
+        return '<tr><td class="rank">' + (i + 1) + '</td>' +
+          '<td class="swatch-cell"><span class="mini-swatch" style="background:' + esc(e.guessHex) + '"></span></td>' +
+          '<td>' + esc(e.playerName) + '</td>' +
+          '<td class="score">' + e.score + '</td></tr>';
+      }).join('');
+      var board = round.leaderboard.length
+        ? '<table class="board"><thead><tr><th></th><th></th><th>Player</th><th style="text-align:right">Off by</th></tr></thead><tbody>' + rows + '</tbody></table>'
+        : '<p class="empty">Nobody guessed this one.</p>';
+      return '<div class="round">' +
+        '<div class="round-head"><span class="round-swatch" style="background:' + esc(round.hex) + '"></span>' +
+        '<div><div class="round-name">' + esc(round.name) + '</div>' +
+        '<div class="round-meta">' + esc(round.hex) + ' · ' + esc(round.dayKey) + '</div></div></div>' +
+        board + '</div>';
+    }).join('');
+  }
+
+  function loadHistory() {
+    api('/guess/history').then(renderHistory).catch(function () {});
+  }
+
+  /* ------------------------------------------------------- admin ----- */
+
+  var adminOpen = false;
+
+  function adminHeaders() {
+    return { 'x-admin-key': localStorage.getItem(STORAGE_ADMIN_KEY) || '' };
+  }
+
+  function renderAdminQueue(data) {
+    var todayHtml = data.today.name
+      ? '<p class="dim">Live today: <strong>' + esc(data.today.name) + '</strong> — <span style="font-family:var(--font-mono)">' + esc(data.today.hex) + '</span></p>'
+      : '<p class="dim">Nothing is live today.</p>';
+    $('admin-today').innerHTML = todayHtml;
+
+    if (!data.queued.length) {
+      $('admin-queue-list').innerHTML = '<p class="empty">Nothing queued.</p>';
+      return;
+    }
+    $('admin-queue-list').innerHTML = data.queued.map(function (q) {
+      return '<div class="queue-row">' +
+        '<span class="queue-swatch" style="background:' + esc(q.hex) + '"></span>' +
+        '<div class="queue-info"><div class="queue-name">' + esc(q.name) + '</div>' +
+        '<div class="queue-meta">' + esc(q.hex) + ' · goes live ' + esc(q.goesLiveDayKey) + '</div></div>' +
+        '<button class="queue-remove" data-id="' + esc(q.id) + '">Remove</button></div>';
+    }).join('');
+
+    Array.prototype.forEach.call($('admin-queue-list').querySelectorAll('.queue-remove'), function (btn) {
+      btn.addEventListener('click', function () {
+        api('/guess/queue/' + btn.dataset.id, { method: 'DELETE', headers: adminHeaders() })
+          .then(loadAdminQueue)
+          .catch(function (err) { alert(err.message || 'Could not remove that.'); });
+      });
+    });
+  }
+
+  function loadAdminQueue() {
+    api('/guess/queue', { headers: adminHeaders() })
+      .then(renderAdminQueue)
+      .catch(function (err) {
+        $('admin-today').innerHTML = '';
+        $('admin-queue-list').innerHTML = '<p class="status" data-state="error">' + esc(err.message || 'Wrong admin key.') + '</p>';
+      });
+  }
+
+  $('admin-open').addEventListener('click', function () {
+    adminOpen = !adminOpen;
+    $('admin-panel').classList.toggle('open', adminOpen);
+    $('admin-open').textContent = adminOpen ? 'Hide admin' : 'Admin';
+    var savedKey = localStorage.getItem(STORAGE_ADMIN_KEY);
+    if (savedKey) $('admin-key-input').value = savedKey;
+    if (adminOpen) loadAdminQueue();
+  });
+
+  var adminColorInput = $('admin-color-input');
+  var adminHexInput = $('admin-hex-input');
+  adminColorInput.addEventListener('input', function () { adminHexInput.value = adminColorInput.value.toUpperCase(); });
+  adminHexInput.addEventListener('input', function () {
+    var norm = normalizeHex(adminHexInput.value);
+    if (norm) adminColorInput.value = norm;
+  });
+
+  $('admin-queue-btn').addEventListener('click', function () {
+    var key = $('admin-key-input').value.trim();
+    var name = $('admin-name-input').value.trim();
+    var hex = normalizeHex(adminHexInput.value);
+    var status = $('admin-status');
+
+    if (!key) { status.dataset.state = 'error'; status.textContent = 'Enter the admin key.'; return; }
+    if (!name) { status.dataset.state = 'error'; status.textContent = 'Name the color first.'; return; }
+    if (!hex) { status.dataset.state = 'error'; status.textContent = 'That’s not a valid color.'; return; }
+
+    localStorage.setItem(STORAGE_ADMIN_KEY, key);
+    $('admin-queue-btn').disabled = true;
+    status.dataset.state = '';
+    status.textContent = 'Queueing…';
+
+    api('/guess/queue', { method: 'POST', headers: { 'x-admin-key': key }, body: { name: name, hex: hex } })
+      .then(function () {
+        status.dataset.state = 'ok';
+        status.textContent = 'Queued.';
+        $('admin-name-input').value = '';
+        loadAdminQueue();
+      })
+      .catch(function (err) {
+        status.dataset.state = 'error';
+        status.textContent = err.message || 'Something went wrong.';
+      })
+      .finally(function () { $('admin-queue-btn').disabled = false; });
+  });
+
+  loadToday();
+  loadHistory();
+})();
+</script>
+
+</body>
+</html>
