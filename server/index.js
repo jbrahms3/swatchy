@@ -1112,6 +1112,227 @@ app.get(
   })
 );
 
+/* ------------------------------------------------------------------ *
+ * Guess the Color — a public mini-game on the marketing site
+ * (server/guess.html), not the app. No accounts: a player is only ever
+ * whatever name they typed. The admin panel on the same page is gated by
+ * a shared secret (GUESS_ADMIN_KEY) instead of a real login, since there's
+ * no auth system on this page to hang a real admin check off of.
+ * ------------------------------------------------------------------ */
+
+const GUESS_ADMIN_KEY = process.env.GUESS_ADMIN_KEY ?? '';
+const MAX_GUESS_NAME_LEN = 40;
+const MAX_QUEUED_ROUNDS = 200;
+
+/** UTC calendar date, e.g. "2026-08-29" — stable midnight-to-midnight. */
+function dayKeyFor(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+/** Constant-time compare so a wrong guess at the admin key can't be timed. */
+function isAdminKey(candidate) {
+  const given = Buffer.from(String(candidate ?? ''));
+  const real = Buffer.from(GUESS_ADMIN_KEY);
+  if (!GUESS_ADMIN_KEY || given.length !== real.length) return false;
+  return crypto.timingSafeEqual(given, real);
+}
+
+const requireGuessAdmin = () => (req, res, next) => {
+  const key = req.get('x-admin-key') ?? req.body?.adminKey;
+  if (!isAdminKey(key)) return res.status(403).json({ error: 'not allowed' });
+  next();
+};
+
+/**
+ * Today's round, promoting the queue on its first request of the day —
+ * same pattern as paletteForWeek(). Unlike the weekly palette there's no
+ * generated fallback: if nothing's queued, there's just no game today.
+ */
+async function colorRoundForDay(dayKey) {
+  const live = await pool.query(
+    'select id, name, hex from color_guess_rounds where day_key = $1',
+    [dayKey]
+  );
+  if (live.rows[0]) return live.rows[0];
+
+  try {
+    const claimed = await pool.query(
+      `update color_guess_rounds
+          set day_key = $1, went_live_at = now()
+        where id = (
+                select id from color_guess_rounds
+                 where day_key is null
+                 order by created_at, id
+                 limit 1
+                 for update skip locked
+              )
+      returning id, name, hex`,
+      [dayKey]
+    );
+    if (claimed.rows[0]) return claimed.rows[0];
+  } catch (err) {
+    if (err.code !== '23505') throw err; // anything but a day_key collision is a real failure
+  }
+
+  const raced = await pool.query(
+    'select id, name, hex from color_guess_rounds where day_key = $1',
+    [dayKey]
+  );
+  return raced.rows[0] ?? null;
+}
+
+app.get('/guess', (req, res) => res.sendFile(path.join(__dirname, 'guess.html')));
+
+app.get(
+  '/guess/today',
+  asyncRoute(async (req, res) => {
+    const dayKey = dayKeyFor(new Date());
+    const round = await colorRoundForDay(dayKey);
+    res.json({ dayKey, name: round?.name ?? null });
+  })
+);
+
+app.get(
+  '/guess/state',
+  asyncRoute(async (req, res) => {
+    const name = String(req.query.name ?? '').trim().slice(0, MAX_GUESS_NAME_LEN);
+    const dayKey = dayKeyFor(new Date());
+    const round = await colorRoundForDay(dayKey);
+    if (!round || !name) return res.json({ myGuessHex: null });
+
+    const result = await pool.query(
+      'select guess_hex from color_guess_entries where round_id = $1 and lower(player_name) = lower($2)',
+      [round.id, name]
+    );
+    res.json({ myGuessHex: result.rows[0]?.guess_hex ?? null });
+  })
+);
+
+app.post(
+  '/guess/submit',
+  asyncRoute(async (req, res) => {
+    const name = String(req.body.name ?? '').trim().slice(0, MAX_GUESS_NAME_LEN);
+    const hex = normalizeHex(req.body.hex);
+    if (!name) return res.status(400).json({ error: 'a name is required' });
+    if (!hex) return res.status(400).json({ error: 'not a valid hex color' });
+
+    const dayKey = dayKeyFor(new Date());
+    const round = await colorRoundForDay(dayKey);
+    if (!round) return res.status(404).json({ error: 'no color is up for guessing today' });
+
+    await pool.query(
+      `insert into color_guess_entries (round_id, player_name, guess_hex)
+       values ($1, $2, $3)
+       on conflict (round_id, lower(player_name))
+       do update set guess_hex = excluded.guess_hex, player_name = excluded.player_name, created_at = now()`,
+      [round.id, name, hex]
+    );
+    res.status(201).json({ ok: true });
+  })
+);
+
+// Every past (day has already rolled over) round, most recent first, hex
+// and a full ranked leaderboard now that it's fair game to show them.
+app.get(
+  '/guess/history',
+  asyncRoute(async (req, res) => {
+    const dayKey = dayKeyFor(new Date());
+    const rounds = await pool.query(
+      `select id, name, hex, day_key
+         from color_guess_rounds
+        where day_key is not null and day_key < $1
+        order by day_key desc
+        limit 30`,
+      [dayKey]
+    );
+    if (rounds.rows.length === 0) return res.json([]);
+
+    const entries = await pool.query(
+      `select round_id, player_name, guess_hex
+         from color_guess_entries
+        where round_id = any($1::uuid[])`,
+      [rounds.rows.map((r) => r.id)]
+    );
+
+    res.json(
+      rounds.rows.map((round) => {
+        const leaderboard = entries.rows
+          .filter((e) => e.round_id === round.id)
+          .map((e) => ({
+            playerName: e.player_name,
+            guessHex: e.guess_hex,
+            score: hexDistance(round.hex, e.guess_hex),
+          }))
+          .sort((a, b) => a.score - b.score);
+        return { dayKey: round.day_key, name: round.name, hex: round.hex, leaderboard };
+      })
+    );
+  })
+);
+
+app.get(
+  '/guess/queue',
+  requireGuessAdmin(),
+  asyncRoute(async (req, res) => {
+    const dayKey = dayKeyFor(new Date());
+    const todayRound = await colorRoundForDay(dayKey);
+    const queued = await pool.query(
+      'select id, name, hex, created_at from color_guess_rounds where day_key is null order by created_at, id'
+    );
+
+    const dayMs = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    res.json({
+      today: todayRound ? { dayKey, name: todayRound.name, hex: todayRound.hex } : { dayKey, name: null, hex: null },
+      queued: queued.rows.map((row, i) => ({
+        id: row.id,
+        name: row.name,
+        hex: row.hex,
+        createdAt: +row.created_at,
+        goesLiveDayKey: dayKeyFor(new Date(now + (i + 1) * dayMs)),
+      })),
+    });
+  })
+);
+
+app.post(
+  '/guess/queue',
+  requireGuessAdmin(),
+  asyncRoute(async (req, res) => {
+    const name = String(req.body.name ?? '').trim().slice(0, 60);
+    const hex = normalizeHex(req.body.hex);
+    if (!name) return res.status(400).json({ error: 'a name is required' });
+    if (!hex) return res.status(400).json({ error: 'not a valid hex color' });
+
+    const count = await pool.query(
+      'select count(*)::int as n from color_guess_rounds where day_key is null'
+    );
+    if (count.rows[0].n >= MAX_QUEUED_ROUNDS) {
+      return res.status(400).json({ error: `at most ${MAX_QUEUED_ROUNDS} rounds can be queued at once` });
+    }
+
+    const inserted = await pool.query(
+      'insert into color_guess_rounds (name, hex) values ($1, $2) returning id, name, hex, created_at',
+      [name, hex]
+    );
+    const row = inserted.rows[0];
+    res.status(201).json({ id: row.id, name: row.name, hex: row.hex, createdAt: +row.created_at });
+  })
+);
+
+app.delete(
+  '/guess/queue/:id',
+  requireGuessAdmin(),
+  asyncRoute(async (req, res) => {
+    const result = await pool.query(
+      'delete from color_guess_rounds where id = $1 and day_key is null returning id',
+      [req.params.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'not a queued round' });
+    res.status(204).end();
+  })
+);
+
 app.use((err, req, res, next) => {
   console.error(err);
   if (res.headersSent) return next(err);

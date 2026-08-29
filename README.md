@@ -36,6 +36,22 @@ week like any other.
 Who can curate is the `ADMIN_EMAILS` env var on the API service — a
 comma-separated list of Clerk account emails, defaulting to the repo owner's.
 
+## Guess the Color
+
+A separate mini-game on the marketing site (`server/guess.html`, served at
+`/guess`) — not part of the app or its accounts. Someone names a color without
+showing it; anyone visiting picks their best guess. The color is queued ahead
+by an admin the same way weekly palettes are, and promoted at the first
+request of a new UTC day. Once a day's passed, its real color and a ranked
+leaderboard (closest guess wins) show up under "Past days".
+
+There's no login on this page — a player is only ever whatever name they
+type, so "closest guess" is per name, not a verified identity. The admin
+panel (queue a color, see what's up next) is gated by a shared secret
+instead: set `GUESS_ADMIN_KEY` on the API service and give it to whoever's
+curating. Admin actions are refused entirely if it isn't set — there's no
+default.
+
 ## Web build (production)
 
 ```bash
