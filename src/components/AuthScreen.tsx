@@ -1,5 +1,8 @@
-import { useSignIn, useSignUp } from '@clerk/clerk-expo';
-import { useState } from 'react';
+import { useSignIn, useSignUp, useSSO } from '@clerk/clerk-expo';
+import { Ionicons } from '@expo/vector-icons';
+import * as Linking from 'expo-linking';
+import * as WebBrowser from 'expo-web-browser';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -16,6 +19,21 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '@/components/Button';
 import { T, radius } from '@/lib/theme';
 
+// Required once, wherever an OAuth flow might be initiated: lets the
+// browser tab Clerk opens for Google's consent screen hand control back to
+// this app when it redirects to our scheme, instead of stranding the tab.
+WebBrowser.maybeCompleteAuthSession();
+
+/** Preloads the native browser so the Google sheet opens faster — mainly helps Android. */
+function useWarmUpBrowser() {
+  useEffect(() => {
+    void WebBrowser.warmUpAsync();
+    return () => {
+      void WebBrowser.coolDownAsync();
+    };
+  }, []);
+}
+
 type Mode = 'signIn' | 'signUp' | 'verify' | 'forgotEmail' | 'forgotReset';
 
 /**
@@ -23,12 +41,16 @@ type Mode = 'signIn' | 'signUp' | 'verify' | 'forgotEmail' | 'forgotReset';
  * signup and its email-code reset flow for a forgotten password. Both
  * verification steps share the same two-stage shape: request a code by
  * email, then come back and attempt it — reset just adds a new password to
- * the second stage.
+ * the second stage. Google is a single extra button up top, using Clerk's
+ * own hosted OAuth flow (a browser tab it manages) rather than the native
+ * Google Sign-In SDK.
  */
 export function AuthScreen() {
   const insets = useSafeAreaInsets();
   const { isLoaded: signInLoaded, signIn, setActive: setActiveFromSignIn } = useSignIn();
   const { isLoaded: signUpLoaded, signUp, setActive: setActiveFromSignUp } = useSignUp();
+  const { startSSOFlow } = useSSO();
+  useWarmUpBrowser();
 
   const [mode, setMode] = useState<Mode>('signIn');
   const [email, setEmail] = useState('');
@@ -139,6 +161,26 @@ export function AuthScreen() {
     }
   };
 
+  const handleGoogle = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      const { createdSessionId, setActive } = await startSSOFlow({
+        strategy: 'oauth_google',
+        redirectUrl: Linking.createURL('/sso-callback'),
+      });
+      if (createdSessionId && setActive) {
+        await setActive({ session: createdSessionId });
+      }
+      // A null createdSessionId with no error means the browser tab was
+      // dismissed without finishing — nothing went wrong, just nothing to do.
+    } catch (err) {
+      setError(clerkMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const submit =
     mode === 'signIn'
       ? handleSignIn
@@ -186,6 +228,22 @@ export function AuthScreen() {
         <View style={styles.form}>
           {(mode === 'signIn' || mode === 'signUp') && (
             <>
+              <Pressable
+                onPress={handleGoogle}
+                disabled={busy}
+                accessibilityRole="button"
+                accessibilityLabel="Continue with Google"
+                style={({ pressed }) => [styles.google, { opacity: busy ? 0.6 : pressed ? 0.8 : 1 }]}>
+                <Ionicons name="logo-google" size={17} color={T.text} />
+                <Text style={styles.googleText}>Continue with Google</Text>
+              </Pressable>
+
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>or</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
               <TextInput
                 value={email}
                 onChangeText={setEmail}
@@ -348,6 +406,20 @@ const styles = StyleSheet.create({
   subtitle: { color: T.textFaint, fontSize: 14, marginTop: 8, lineHeight: 20, maxWidth: 300 },
 
   form: { marginTop: 32, gap: 12 },
+  google: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    height: 50,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: T.border,
+  },
+  googleText: { color: T.text, fontSize: 15, fontWeight: '700' },
+  divider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 2 },
+  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: T.border },
+  dividerText: { color: T.textFaint, fontSize: 12, fontWeight: '600' },
   input: {
     height: 50,
     borderRadius: radius.md,
