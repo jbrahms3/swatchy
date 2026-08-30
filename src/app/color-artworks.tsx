@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -23,12 +23,23 @@ export default function ColorArtworksScreen() {
   const [artworks, setArtworks] = useState<Artwork[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Always call the latest loader, but without it in the effect's deps —
+  // it's a fresh function identity on every render of the store's owner
+  // (nothing in this codebase memoizes the `Store` object itself), which
+  // was re-running this effect, resetting artworks to null and restarting
+  // the fetch, on every unrelated re-render: the "stuck loading and
+  // blinking" this screen was reported doing. Only `hex` (a plain string,
+  // stable by value) should ever restart the fetch.
+  const loadRef = useRef(loadArtworksByColor);
+  loadRef.current = loadArtworksByColor;
+
   useEffect(() => {
     let cancelled = false;
     setArtworks(null);
     setError(null);
 
-    loadArtworksByColor(hex)
+    loadRef
+      .current(hex)
       .then((result) => {
         if (!cancelled) setArtworks(result);
       })
@@ -40,7 +51,10 @@ export default function ColorArtworksScreen() {
     return () => {
       cancelled = true;
     };
-  }, [hex, loadArtworksByColor]);
+    // loadRef.current is always the latest loader — deliberately excluded
+    // so a fresh function identity elsewhere can't restart this fetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hex]);
 
   const ink = readableOn(hexToRgb(hex));
   const shownCount = artworks?.length ?? (count ? Number(count) : undefined);
