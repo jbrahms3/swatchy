@@ -1,12 +1,21 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ColorDetailSheet } from '@/components/ColorDetailSheet';
 import { ColorInfoModal } from '@/components/ColorInfoModal';
 import { hexToRgb, readableOn } from '@/lib/color';
-import type { Artwork, ArtworkColor } from '@/lib/store';
+import { useStore, type Artwork, type ArtworkColor, type Post } from '@/lib/store';
 import { T, radius } from '@/lib/theme';
 import { timeAgo } from '@/lib/time';
 
@@ -17,12 +26,45 @@ type Props = {
 
 /**
  * The expanded view of a piece of artwork: full photo, caption, and every
- * color it's tagged with as its own chip — tap one for more information
- * about that color (see ColorInfoModal).
+ * color it's tagged with as its own chip. Tapping a chip brings up the
+ * same color card tapping a color on Discover does — a real post claiming
+ * that hex, if one exists. Most catalog colors do, since they're most
+ * often reached that way; ones that only ever came from someone's saved
+ * swatches fall back to a plainer color card instead (see ColorInfoModal).
  */
 export function ArtworkDetailModal({ artwork, onClose }: Props) {
   const insets = useSafeAreaInsets();
+  const { loadPostByColor } = useStore();
+
   const [activeColor, setActiveColor] = useState<ArtworkColor | null>(null);
+  const [activePost, setActivePost] = useState<Post | null>(null);
+  const [lookingUp, setLookingUp] = useState(false);
+  // Tapping a second chip before the first's lookup resolves shouldn't let
+  // the stale one clobber it — only the most recent request is allowed to
+  // apply its result.
+  const lookupSeq = useRef(0);
+
+  const openColor = async (color: ArtworkColor) => {
+    const seq = ++lookupSeq.current;
+    setActiveColor(color);
+    setActivePost(null);
+    setLookingUp(true);
+    try {
+      const post = await loadPostByColor(color.hex);
+      if (seq === lookupSeq.current) setActivePost(post);
+    } catch (err) {
+      console.error('[artwork-detail] Failed to look up a post for this color', err);
+      if (seq === lookupSeq.current) setActivePost(null); // falls back to ColorInfoModal below
+    } finally {
+      if (seq === lookupSeq.current) setLookingUp(false);
+    }
+  };
+
+  const closeColor = () => {
+    lookupSeq.current++; // invalidates any lookup still in flight
+    setActiveColor(null);
+    setActivePost(null);
+  };
 
   if (!artwork) return null;
 
@@ -67,16 +109,26 @@ export function ArtworkDetailModal({ artwork, onClose }: Props) {
             ) : (
               <View style={styles.colorWrap}>
                 {artwork.colors.map((c) => (
-                  <ColorChip key={c.hex} color={c} onPress={() => setActiveColor(c)} />
+                  <ColorChip key={c.hex} color={c} onPress={() => openColor(c)} />
                 ))}
               </View>
             )}
           </View>
         </ScrollView>
 
-        {/* An overlay, not a second Modal — see the note on ColorInfoModal
-            for why nesting native Modals here doesn't work reliably. */}
-        <ColorInfoModal color={activeColor} onClose={() => setActiveColor(null)} />
+        {/* Overlays, not second Modals — a native Modal nested inside this
+            one doesn't reliably show or take touches. */}
+        {lookingUp && (
+          <View style={styles.loading}>
+            <ActivityIndicator color={T.text} />
+          </View>
+        )}
+        {activeColor && !lookingUp && activePost && (
+          <ColorDetailSheet post={activePost} onClose={closeColor} embedded />
+        )}
+        {activeColor && !lookingUp && !activePost && (
+          <ColorInfoModal color={activeColor} onClose={closeColor} />
+        )}
       </View>
     </Modal>
   );
@@ -138,4 +190,13 @@ const styles = StyleSheet.create({
     maxWidth: 180,
   },
   chipText: { fontSize: 13, fontWeight: '700' },
+
+  loading: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 10,
+    elevation: 10,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

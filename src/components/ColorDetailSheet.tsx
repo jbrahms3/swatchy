@@ -8,14 +8,28 @@ import { T } from '@/lib/theme';
 type Props = {
   post: Post | null;
   onClose: () => void;
+  /**
+   * Renders without its own <Modal> — a plain overlay instead — for when
+   * this is opened from inside a screen that's already a Modal (e.g.
+   * ArtworkDetailModal). A second native Modal nested inside a first one
+   * doesn't reliably show or take touches. Also turns off the PostCard's
+   * own "tap the photo for the full-screen detail" behavior, since that
+   * opens a third Modal (PhotoDetailModal) that would have the same
+   * problem one level deeper.
+   */
+  embedded?: boolean;
 };
 
-/** Full-card view of a single discovered color, opened from the Discover grid. */
-export function ColorDetailSheet({ post, onClose }: Props) {
+/**
+ * Full-card view of a single color: the same PostCard rendering used
+ * anywhere else, in a bottom sheet. Opened from the Discover grid, and
+ * (embedded) from tapping a color chip in an expanded artwork.
+ */
+export function ColorDetailSheet({ post, onClose, embedded }: Props) {
   if (!post) return null;
 
-  return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+  const content = (
+    <>
       <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Dismiss" />
 
       <View style={styles.sheetWrap} pointerEvents="box-none">
@@ -34,15 +48,26 @@ export function ColorDetailSheet({ post, onClose }: Props) {
             contentContainerStyle={styles.content}
             showsVerticalScrollIndicator={false}
             bounces={false}>
-            <PostCard post={post} />
+            <PostCard post={post} photoOpensDetail={!embedded} />
           </ScrollView>
         </View>
       </View>
+    </>
+  );
+
+  if (embedded) return <View style={styles.embeddedRoot}>{content}</View>;
+
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      {content}
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  // Only used when embedded: fills whatever screen this is dropped into,
+  // above its content, the way the Modal case would fill the window.
+  embeddedRoot: { ...StyleSheet.absoluteFillObject, zIndex: 10, elevation: 10 },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)' },
   sheetWrap: { flex: 1, justifyContent: 'flex-end' },
   sheet: {

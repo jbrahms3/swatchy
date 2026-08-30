@@ -196,6 +196,8 @@ export type Store = {
   loadArtworksByColor(hex: string): Promise<Artwork[]>;
   /** Every color anyone's saved or claimed, deduped by hex — what artwork uploads get auto-tagged against. */
   loadColorCatalog(): Promise<ArtworkColor[]>;
+  /** The most recent post claiming this hex, or null if nobody's posted it. */
+  loadPostByColor(hex: string): Promise<Post | null>;
 };
 
 export function useStoreState(): Store {
@@ -448,6 +450,14 @@ export function useStoreState(): Store {
 
   const loadColorCatalog = useCallback(() => api.get<ArtworkColor[]>('/colors/catalog'), [api]);
 
+  const loadPostByColor = useCallback(
+    async (hex: string) => {
+      const post = await api.get<Post | null>(`/posts/by-color/${encodeURIComponent(hex)}`);
+      return post ? withAbsolutePhoto(post, api) : null;
+    },
+    [api]
+  );
+
   const myPosts = useMemo(() => posts.filter((p) => p.mine), [posts]);
 
   return {
@@ -479,6 +489,7 @@ export function useStoreState(): Store {
     deleteArtwork,
     loadArtworksByColor,
     loadColorCatalog,
+    loadPostByColor,
   };
 }
 

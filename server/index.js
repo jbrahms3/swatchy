@@ -568,6 +568,43 @@ app.get(
   })
 );
 
+// The one post to show for a bare hex — backs the color-info sheet opened
+// from an artwork's tagged colors, which has a color but no specific post
+// to point at (it's a catalog match, see colorExtract.ts). Most recent
+// post claiming that hex wins; null if nobody's ever posted it (only
+// saved it), which the client falls back to a plainer view for.
+app.get(
+  '/posts/by-color/:hex',
+  requireAuth(),
+  asyncRoute(async (req, res) => {
+    const user = await ensureUser(getAuth(req).userId);
+    const hex = normalizeHex(req.params.hex);
+    if (!hex) return res.status(400).json({ error: 'not a valid hex color' });
+
+    const [result, counts] = await Promise.all([
+      pool.query(
+        `select
+           p.id, p.author_id, u.name as author_name, p.photo_key, p.photo_aspect,
+           p.pick_u, p.pick_v, p.swatch_name, p.swatch_hex, p.caption, p.created_at,
+           coalesce(l.like_count, 0) as like_count,
+           exists(select 1 from likes where post_id = p.id and user_id = $1) as liked_by_me
+         from posts p
+         join users u on u.id = p.author_id
+         left join (
+           select post_id, count(*) as like_count from likes group by post_id
+         ) l on l.post_id = p.id
+        where upper(p.swatch_hex) = $2
+        order by p.created_at desc
+        limit 1`,
+        [user.id, hex]
+      ),
+      artworkCountsByHex(),
+    ]);
+
+    res.json(result.rows[0] ? postRow(result.rows[0], user.id, counts) : null);
+  })
+);
+
 app.post(
   '/posts',
   requireAuth(),
