@@ -59,7 +59,12 @@ export default function DiscoverScreen() {
         ]}
         keyboardShouldPersistTaps="handled"
         renderItem={({ item }) => (
-          <SwatchChip swatch={item.swatch} size={chipSize} onPress={() => setViewing(item)} />
+          <SwatchChip
+            swatch={item.swatch}
+            size={chipSize}
+            onPress={() => setViewing(item)}
+            showTaggedBadge
+          />
         )}
         ListHeaderComponent={
           <View style={styles.header}>
