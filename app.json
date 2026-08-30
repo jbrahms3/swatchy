@@ -40,6 +40,13 @@
           "cameraPermission": "ColorClaim uses the camera so you can claim colors from a photo you take."
         }
       ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "ColorClaim uses the camera so you can photograph a match for the weekly color challenge.",
+          "recordAudioAndroid": false
+        }
+      ],
       "expo-font",
       "expo-secure-store"
     ],
