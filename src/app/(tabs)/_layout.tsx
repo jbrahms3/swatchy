@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Tabs, useRouter } from 'expo-router';
+import { Tabs } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -8,7 +8,6 @@ import { CreateMenu } from '@/components/CreateMenu';
 import { T } from '@/lib/theme';
 
 export default function TabsLayout() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -70,18 +69,7 @@ export default function TabsLayout() {
         <Ionicons name="add" size={26} color={T.bg} />
       </Pressable>
 
-      <CreateMenu
-        visible={menuOpen}
-        onClose={() => setMenuOpen(false)}
-        onClaimColor={() => {
-          setMenuOpen(false);
-          router.push('/pick');
-        }}
-        onSubmitArtwork={() => {
-          setMenuOpen(false);
-          router.push('/artwork-upload');
-        }}
-      />
+      <CreateMenu visible={menuOpen} onClose={() => setMenuOpen(false)} />
     </View>
   );
 }

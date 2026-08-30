@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -36,6 +36,10 @@ export default function ArtworkUploadScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { loadColorCatalog, publishArtwork } = useStore();
+  // Set when arriving from the FAB's menu, which already picked a photo
+  // itself — skips straight past the chooser below instead of asking again.
+  const { photoUri, photoWidth, photoHeight } =
+    useLocalSearchParams<{ photoUri?: string; photoWidth?: string; photoHeight?: string }>();
 
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [colors, setColors] = useState<ArtworkColor[]>([]);
@@ -66,6 +70,11 @@ export default function ArtworkUploadScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [photo?.uri]);
 
+  /** Loads a photo from wherever it came from — the chooser below, or the FAB's own picker. */
+  const loadPhoto = (uri: string, width: number, height: number) => {
+    setPhoto({ uri, width, height, aspect: width && height ? width / height : 1 });
+  };
+
   const choosePhoto = async (source: 'camera' | 'library') => {
     const permission =
       source === 'camera'
@@ -88,13 +97,15 @@ export default function ArtworkUploadScreen() {
     if (result.canceled || !result.assets?.length) return;
 
     const asset = result.assets[0];
-    setPhoto({
-      uri: asset.uri,
-      width: asset.width,
-      height: asset.height,
-      aspect: asset.width && asset.height ? asset.width / asset.height : 1,
-    });
+    loadPhoto(asset.uri, asset.width, asset.height);
   };
+
+  // A photo already picked by the FAB's menu arrives as params — load it
+  // once on mount instead of showing the chooser and asking again.
+  useEffect(() => {
+    if (photoUri) loadPhoto(photoUri, Number(photoWidth), Number(photoHeight));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const removeColor = (hex: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
