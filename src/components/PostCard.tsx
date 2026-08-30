@@ -14,7 +14,17 @@ import { timeAgo } from '@/lib/time';
 /** Size of the dot marking where on the photo the color was picked from. */
 const PHOTO_MARKER_SIZE = 24;
 
-export function PostCard({ post }: { post: Post }) {
+type Props = {
+  post: Post;
+  /**
+   * Off when this PostCard is itself nested inside another open Modal
+   * (see ColorDetailSheet's `embedded`) — the photo's tap would open
+   * PhotoDetailModal, a Modal one level deeper than RN reliably nests.
+   */
+  photoOpensDetail?: boolean;
+};
+
+export function PostCard({ post, photoOpensDetail = true }: Props) {
   const router = useRouter();
   const { toggleLike, deletePost } = useStore();
   const [holding, setHolding] = useState(false);
@@ -34,6 +44,29 @@ export function PostCard({ post }: { post: Post }) {
 
   const swatch = post.swatch;
   const ink = readableOn(hexToRgb(swatch.hex));
+
+  const photo = post.photoUri && (
+    <View style={[styles.media, { aspectRatio: post.photoAspect ?? 1 }]}>
+      <Image
+        source={{ uri: post.photoUri }}
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+        transition={180}
+      />
+
+      {/* Marks the exact spot the color was pulled from — only while holding the band below. */}
+      {holding && post.pickPoint && (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.photoMarker,
+            { left: `${post.pickPoint.u * 100}%`, top: `${post.pickPoint.v * 100}%` },
+          ]}>
+          <View style={[styles.photoMarkerDot, { backgroundColor: swatch.hex }]} />
+        </View>
+      )}
+    </View>
+  );
 
   return (
     <View style={styles.card}>
@@ -60,32 +93,15 @@ export function PostCard({ post }: { post: Post }) {
         )}
       </View>
 
-      {post.photoUri && (
+      {photo && photoOpensDetail ? (
         <Pressable
           onPress={() => setShowDetail(true)}
           accessibilityRole="button"
           accessibilityLabel="View photo and color details">
-          <View style={[styles.media, { aspectRatio: post.photoAspect ?? 1 }]}>
-            <Image
-              source={{ uri: post.photoUri }}
-              style={StyleSheet.absoluteFill}
-              contentFit="cover"
-              transition={180}
-            />
-
-            {/* Marks the exact spot the color was pulled from — only while holding the band below. */}
-            {holding && post.pickPoint && (
-              <View
-                pointerEvents="none"
-                style={[
-                  styles.photoMarker,
-                  { left: `${post.pickPoint.u * 100}%`, top: `${post.pickPoint.v * 100}%` },
-                ]}>
-                <View style={[styles.photoMarkerDot, { backgroundColor: swatch.hex }]} />
-              </View>
-            )}
-          </View>
+          {photo}
         </Pressable>
+      ) : (
+        photo
       )}
 
       {/* The claimed color, full-bleed — the point of the post, not a footnote.
