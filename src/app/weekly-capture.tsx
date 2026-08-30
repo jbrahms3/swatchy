@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
@@ -94,6 +95,16 @@ export default function WeeklyCaptureScreen() {
   const [area, setArea] = useState({ width: 0, height: 0 });
   const [submitting, setSubmitting] = useState(false);
 
+  // In-app camera (not the OS's own camera UI, launched via ImagePicker
+  // elsewhere in this app) specifically so the target color can float over
+  // the live preview while framing a shot — a system camera can't be
+  // overlaid with custom content.
+  const cameraRef = useRef<CameraView>(null);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [showCamera, setShowCamera] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [capturing, setCapturing] = useState(false);
+
   const fitted = useMemo(() => {
     if (!sampler || !area.width || !area.height) return null;
     let width = area.width;
@@ -105,29 +116,9 @@ export default function WeeklyCaptureScreen() {
     return { width, height };
   }, [sampler, area]);
 
-  const choosePhoto = async (source: 'camera' | 'library') => {
-    const permission =
-      source === 'camera'
-        ? await ImagePicker.requestCameraPermissionsAsync()
-        : await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-    if (!permission.granted) {
-      Alert.alert(
-        source === 'camera' ? 'Camera access needed' : 'Photo access needed',
-        'Enable it for ColorClaim in Settings to photograph a match.'
-      );
-      return;
-    }
-
-    const result =
-      source === 'camera'
-        ? await ImagePicker.launchCameraAsync({ quality: 1, exif: false })
-        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
-
-    if (result.canceled || !result.assets?.length) return;
-
-    const asset = result.assets[0];
-    setPhoto({ uri: asset.uri, width: asset.width, height: asset.height });
+  /** Loads whatever photo just came in — from the library or the in-app camera alike. */
+  const handleNewPhoto = async (uri: string, width: number, height: number) => {
+    setPhoto({ uri, width, height });
     setSampler(null);
     setProbe(null);
     probeRef.current = null;
@@ -137,12 +128,53 @@ export default function WeeklyCaptureScreen() {
     setLoading(true);
 
     try {
-      setSampler(await loadSampler(asset.uri, asset.width, asset.height));
+      setSampler(await loadSampler(uri, width, height));
     } catch (err) {
-      console.error('[weekly-capture] Failed to load sampler for', asset.uri, err);
+      console.error('[weekly-capture] Failed to load sampler for', uri, err);
       setFailure("Couldn't read that image. Try a different photo.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const choosePhoto = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Photo access needed', 'Enable it for ColorClaim in Settings to photograph a match.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
+    if (result.canceled || !result.assets?.length) return;
+
+    const asset = result.assets[0];
+    await handleNewPhoto(asset.uri, asset.width, asset.height);
+  };
+
+  const openCamera = async () => {
+    if (!cameraPermission?.granted) {
+      const result = await requestCameraPermission();
+      if (!result.granted) {
+        Alert.alert('Camera access needed', 'Enable it for ColorClaim in Settings to photograph a match.');
+        return;
+      }
+    }
+    setCameraReady(false);
+    setShowCamera(true);
+  };
+
+  const capturePhoto = async () => {
+    if (!cameraRef.current || capturing) return;
+    setCapturing(true);
+    try {
+      const result = await cameraRef.current.takePictureAsync({ quality: 1, exif: false });
+      setShowCamera(false);
+      await handleNewPhoto(result.uri, result.width, result.height);
+    } catch (err) {
+      console.error('[weekly-capture] Failed to capture photo', err);
+      Alert.alert('Could not take photo', 'Something went wrong. Try again.');
+    } finally {
+      setCapturing(false);
     }
   };
 
@@ -201,6 +233,54 @@ export default function WeeklyCaptureScreen() {
     }
   };
 
+  // A full-bleed camera screen of its own, not squeezed into the normal
+  // layout below — the target swatch floats over the live preview so it
+  // can be compared against whatever the camera's actually seeing, and
+  // everything else (the review/sample/submit flow) only makes sense once
+  // a photo actually exists.
+  if (showCamera) {
+    return (
+      <View style={styles.cameraRoot}>
+        <CameraView
+          ref={cameraRef}
+          style={StyleSheet.absoluteFill}
+          facing="back"
+          onCameraReady={() => setCameraReady(true)}
+        />
+
+        <Pressable
+          onPress={() => setShowCamera(false)}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Cancel"
+          style={[styles.cameraClose, { top: insets.top + 10 }]}>
+          <Ionicons name="close" size={24} color="#fff" />
+        </Pressable>
+
+        <View style={[styles.cameraTarget, { top: insets.top + 10 }]}>
+          <Text style={styles.cameraTargetLabel}>TARGET</Text>
+          <View style={[styles.cameraTargetSwatch, { backgroundColor: targetHex }]}>
+            <Text style={[styles.cameraTargetHex, { color: targetInk }]}>{targetHex}</Text>
+          </View>
+        </View>
+
+        <View style={[styles.cameraShutterRow, { paddingBottom: insets.bottom + 24 }]}>
+          <Pressable
+            onPress={capturePhoto}
+            disabled={!cameraReady || capturing}
+            accessibilityRole="button"
+            accessibilityLabel="Take photo"
+            style={({ pressed }) => [
+              styles.shutter,
+              { opacity: !cameraReady || capturing ? 0.5 : pressed ? 0.8 : 1 },
+            ]}>
+            {capturing ? <ActivityIndicator color="#000" /> : <View style={styles.shutterInner} />}
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <View style={styles.topBar}>
@@ -216,7 +296,7 @@ export default function WeeklyCaptureScreen() {
 
         {photo ? (
           <Pressable
-            onPress={() => choosePhoto('library')}
+            onPress={choosePhoto}
             hitSlop={12}
             accessibilityRole="button"
             accessibilityLabel="Change photo">
@@ -241,8 +321,8 @@ export default function WeeklyCaptureScreen() {
           </Text>
 
           <View style={styles.chooserActions}>
-            <Button label="Take a photo" onPress={() => choosePhoto('camera')} />
-            <Button label="Choose from library" onPress={() => choosePhoto('library')} variant="ghost" />
+            <Button label="Take a photo" onPress={openCamera} />
+            <Button label="Choose from library" onPress={choosePhoto} variant="ghost" />
           </View>
         </View>
       ) : (
@@ -489,4 +569,75 @@ const styles = StyleSheet.create({
   },
 
   submit: { marginHorizontal: 16, marginTop: 14 },
+
+  cameraRoot: { flex: 1, backgroundColor: '#000' },
+  cameraClose: {
+    position: 'absolute',
+    left: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  // The whole point: the target sits over the live preview so it can be
+  // judged against whatever the camera's actually pointed at, not just
+  // recalled from memory or the strip up top on the review screen.
+  cameraTarget: {
+    position: 'absolute',
+    right: 16,
+    alignItems: 'flex-end',
+  },
+  cameraTargetLabel: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+    marginBottom: 6,
+    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowRadius: 4,
+  },
+  cameraTargetSwatch: {
+    height: 44,
+    minWidth: 110,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.85)',
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+  },
+  cameraTargetHex: { fontSize: 15, fontWeight: '800', fontVariant: ['tabular-nums'] },
+
+  cameraShutterRow: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+  },
+  shutter: {
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 4,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  shutterInner: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderColor: '#000',
+  },
 });
