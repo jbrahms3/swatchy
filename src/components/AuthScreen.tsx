@@ -165,9 +165,11 @@ export function AuthScreen() {
     setError(null);
     setBusy(true);
     try {
+      const redirectUrl = Linking.createURL('/sso-callback');
+      console.log('[google sso] redirectUrl', redirectUrl);
       const { createdSessionId, setActive } = await startSSOFlow({
         strategy: 'oauth_google',
-        redirectUrl: Linking.createURL('/sso-callback'),
+        redirectUrl,
       });
       if (createdSessionId && setActive) {
         await setActive({ session: createdSessionId });
