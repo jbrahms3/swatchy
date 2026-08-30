@@ -2,8 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
-import { useMemo, useRef, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -74,6 +74,10 @@ export default function PickScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { saveSwatch, publish } = useStore();
+  // Set when arriving from the FAB's menu, which already picked a photo
+  // itself — skips straight past the chooser below instead of asking again.
+  const { photoUri, photoWidth, photoHeight } =
+    useLocalSearchParams<{ photoUri?: string; photoWidth?: string; photoHeight?: string }>();
 
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [sampler, setSampler] = useState<Sampler | null>(null);
@@ -110,6 +114,30 @@ export default function PickScreen() {
 
   /* ---------------------------------------------------------------- */
 
+  /** Loads a photo from wherever it came from — the chooser below, or the FAB's own picker. */
+  const loadPhoto = async (uri: string, width: number, height: number) => {
+    setPhoto({ uri, width, height });
+    setSampler(null);
+    setProbe(null);
+    probeRef.current = null;
+    setFailure(null);
+    setSwatch(null); // a new photo means the old claim no longer applies
+    setPickPoint(null);
+    setSaved(false);
+    setLoading(true);
+
+    try {
+      setSampler(await loadSampler(uri, width, height));
+    } catch (err) {
+      // Surfaced in Metro/device logs — the on-screen message stays generic,
+      // but this is what to check first when that message shows up.
+      console.error('[ColorClaim] Failed to load sampler for', uri, err);
+      setFailure("Couldn't read that image. Try a different photo.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const choosePhoto = async (source: 'camera' | 'library') => {
     const permission =
       source === 'camera'
@@ -132,27 +160,15 @@ export default function PickScreen() {
     if (result.canceled || !result.assets?.length) return;
 
     const asset = result.assets[0];
-    setPhoto({ uri: asset.uri, width: asset.width, height: asset.height });
-    setSampler(null);
-    setProbe(null);
-    probeRef.current = null;
-    setFailure(null);
-    setSwatch(null); // a new photo means the old claim no longer applies
-    setPickPoint(null);
-    setSaved(false);
-    setLoading(true);
-
-    try {
-      setSampler(await loadSampler(asset.uri, asset.width, asset.height));
-    } catch (err) {
-      // Surfaced in Metro/device logs — the on-screen message stays generic,
-      // but this is what to check first when that message shows up.
-      console.error('[ColorClaim] Failed to load sampler for', asset.uri, err);
-      setFailure("Couldn't read that image. Try a different photo.");
-    } finally {
-      setLoading(false);
-    }
+    await loadPhoto(asset.uri, asset.width, asset.height);
   };
+
+  // A photo already picked by the FAB's menu arrives as params — load it
+  // once on mount instead of showing the chooser and asking again.
+  useEffect(() => {
+    if (photoUri) loadPhoto(photoUri, Number(photoWidth), Number(photoHeight));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const trackTouch = (event: GestureResponderEvent) => {
     if (!sampler || !fitted) return;
