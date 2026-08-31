@@ -26,7 +26,8 @@ class ApiError extends Error {
 async function request<T>(
   getToken: GetToken,
   path: string,
-  init: RequestInit = {}
+  init: RequestInit = {},
+  retriedAfterUnauthenticated = false
 ): Promise<T> {
   const token = await getToken();
 
@@ -38,6 +39,14 @@ async function request<T>(
   }
 
   const res = await fetch(`${API_URL}${path}`, { ...init, headers });
+
+  // Right after a cold app launch, a screen's first fetch can race Clerk's
+  // own session hydration — getToken() briefly resolves to null before
+  // Clerk finishes caching a real one. Retry once with a fresh token before
+  // surfacing an error, rather than making every screen guard against it.
+  if (res.status === 401 && !retriedAfterUnauthenticated) {
+    return request<T>(getToken, path, init, true);
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
