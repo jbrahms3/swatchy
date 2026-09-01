@@ -87,6 +87,10 @@ export default function PickScreen() {
   // Only one color can be claimed per photo — each release replaces this.
   const [swatch, setSwatch] = useState<Swatch | null>(null);
   const [editing, setEditing] = useState<Swatch | null>(null);
+  // True only for the naming sheet that pops up right after a fresh claim —
+  // tells SwatchEditor to start blank and require a name, instead of the
+  // pre-filled behavior used when re-opening it later to rename.
+  const [namingFreshClaim, setNamingFreshClaim] = useState(false);
   const [caption, setCaption] = useState('');
   const [saved, setSaved] = useState(false);
   const [posting, setPosting] = useState(false);
@@ -193,17 +197,24 @@ export default function PickScreen() {
     // Only one claim per photo — every release replaces it, so you can keep
     // re-picking spots until you land on the one you want.
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    setSwatch({
+    const claimed: Swatch = {
       id: newId(),
+      // Fallback only, used if the naming sheet gets dismissed without
+      // typing anything — never shown pre-filled in the sheet itself.
       name: suggestName(current.rgb),
       hex: rgbToHex(current.rgb),
       createdAt: Date.now(),
       artworkCount: 0, // brand new — nothing's tagged it yet
-    });
+    };
+    setSwatch(claimed);
     if (fitted) {
       setPickPoint({ u: clamp01(current.x / fitted.width), v: clamp01(current.y / fitted.height) });
     }
     setSaved(false);
+    // Naming is the next required step, not an optional tweak on a name
+    // nobody chose — open the sheet immediately, blank.
+    setNamingFreshClaim(true);
+    setEditing(claimed);
   };
 
   const onAreaLayout = (event: LayoutChangeEvent) => {
@@ -350,7 +361,10 @@ export default function PickScreen() {
                 {/* Left behind once you lift your finger, so the claim stays anchored to its spot. */}
                 {!probe && swatch && pickPoint && (
                   <Pressable
-                    onPress={() => setEditing(swatch)}
+                    onPress={() => {
+                      setNamingFreshClaim(false);
+                      setEditing(swatch);
+                    }}
                     hitSlop={10}
                     accessibilityRole="button"
                     accessibilityLabel={`Claimed from this spot: ${swatch.name}. Tap to rename.`}
@@ -373,7 +387,11 @@ export default function PickScreen() {
           <View style={styles.panel}>
             <Pressable
               disabled={!swatch || !!probe}
-              onPress={() => swatch && setEditing(swatch)}
+              onPress={() => {
+                if (!swatch) return;
+                setNamingFreshClaim(false);
+                setEditing(swatch);
+              }}
               style={styles.readout}>
               {live ? (
                 <>
@@ -436,7 +454,11 @@ export default function PickScreen() {
 
       <SwatchEditor
         swatch={editing}
-        onClose={() => setEditing(null)}
+        startBlank={namingFreshClaim}
+        onClose={() => {
+          setEditing(null);
+          setNamingFreshClaim(false);
+        }}
         onSave={(name) => setSwatch((s) => (s && s.id === editing?.id ? { ...s, name } : s))}
         onDelete={() => {
           setSwatch((s) => (s && s.id === editing?.id ? null : s));
