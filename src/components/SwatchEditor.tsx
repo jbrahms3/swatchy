@@ -20,25 +20,33 @@ type Props = {
   onClose: () => void;
   onSave: (name: string) => void;
   onDelete?: () => void;
+  /** True right after a fresh pick: starts the field blank instead of
+   *  pre-filled with the suggested name, and won't let it through until
+   *  something's actually typed — naming is the point, not a formality on
+   *  a name nobody chose. */
+  startBlank?: boolean;
 };
 
 /** Bottom sheet for naming a single color. Shared by the picker and the profile. */
-export function SwatchEditor({ swatch, onClose, onSave, onDelete }: Props) {
+export function SwatchEditor({ swatch, onClose, onSave, onDelete, startBlank }: Props) {
   const [name, setName] = useState('');
 
   // Reset the field each time a different swatch opens the sheet.
   useEffect(() => {
-    if (swatch) setName(swatch.name);
-  }, [swatch]);
+    if (swatch) setName(startBlank ? '' : swatch.name);
+  }, [swatch, startBlank]);
 
   if (!swatch) return null;
 
   const rgb = hexToRgb(swatch.hex);
   const { h, s, l } = rgbToHsl(rgb);
   const ink = readableOn(rgb);
+  const trimmed = name.trim();
+  const canCommit = !startBlank || trimmed.length > 0;
 
   const commit = () => {
-    onSave(name.trim() || swatch.name);
+    if (!canCommit) return;
+    onSave(trimmed || swatch.name);
     onClose();
   };
 
@@ -63,7 +71,7 @@ export function SwatchEditor({ swatch, onClose, onSave, onDelete }: Props) {
           <TextInput
             value={name}
             onChangeText={setName}
-            placeholder="e.g. Fire Escape Rust"
+            placeholder={startBlank ? 'What do you call this?' : 'e.g. Fire Escape Rust'}
             placeholderTextColor={T.textFaint}
             style={styles.input}
             autoFocus
@@ -85,7 +93,14 @@ export function SwatchEditor({ swatch, onClose, onSave, onDelete }: Props) {
                 <Text style={styles.deleteText}>Delete</Text>
               </Pressable>
             )}
-            <Button label="Done" onPress={commit} tint={swatch.hex} variant="tinted" style={styles.done} />
+            <Button
+              label="Done"
+              onPress={commit}
+              tint={swatch.hex}
+              variant="tinted"
+              style={styles.done}
+              disabled={!canCommit}
+            />
           </View>
         </View>
       </KeyboardAvoidingView>
