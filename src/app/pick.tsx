@@ -21,7 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/Button';
 import { SwatchEditor } from '@/components/SwatchEditor';
-import { describe, rgbToHex, suggestName, type RGB } from '@/lib/color';
+import { describe, hexToRgb, readableOn, rgbToHex, suggestName, type RGB } from '@/lib/color';
 import { loadSampler, type Sampler } from '@/lib/sampler';
 import { newId, useStore, type Swatch } from '@/lib/store';
 import { T, radius } from '@/lib/theme';
@@ -87,10 +87,10 @@ export default function PickScreen() {
   // Only one color can be claimed per photo — each release replaces this.
   const [swatch, setSwatch] = useState<Swatch | null>(null);
   const [editing, setEditing] = useState<Swatch | null>(null);
-  // True only for the naming sheet that pops up right after a fresh claim —
-  // tells SwatchEditor to start blank and require a name, instead of the
-  // pre-filled behavior used when re-opening it later to rename.
-  const [namingFreshClaim, setNamingFreshClaim] = useState(false);
+  // False until the user has actually opened the sheet and saved a name for
+  // the current claim — drives the "Name this color" CTA in the readout,
+  // and tells SwatchEditor to start blank rather than pre-filled.
+  const [named, setNamed] = useState(false);
   const [caption, setCaption] = useState('');
   const [saved, setSaved] = useState(false);
   const [posting, setPosting] = useState(false);
@@ -126,6 +126,7 @@ export default function PickScreen() {
     probeRef.current = null;
     setFailure(null);
     setSwatch(null); // a new photo means the old claim no longer applies
+    setNamed(false);
     setPickPoint(null);
     setSaved(false);
     setLoading(true);
@@ -197,24 +198,21 @@ export default function PickScreen() {
     // Only one claim per photo — every release replaces it, so you can keep
     // re-picking spots until you land on the one you want.
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    const claimed: Swatch = {
+    setSwatch({
       id: newId(),
-      // Fallback only, used if the naming sheet gets dismissed without
-      // typing anything — never shown pre-filled in the sheet itself.
+      // Fallback only, used if the color gets saved/posted without ever
+      // opening the naming sheet — the readout prompts for a real one via
+      // the "Name this color" button rather than showing this.
       name: suggestName(current.rgb),
       hex: rgbToHex(current.rgb),
       createdAt: Date.now(),
       artworkCount: 0, // brand new — nothing's tagged it yet
-    };
-    setSwatch(claimed);
+    });
     if (fitted) {
       setPickPoint({ u: clamp01(current.x / fitted.width), v: clamp01(current.y / fitted.height) });
     }
     setSaved(false);
-    // Naming is the next required step, not an optional tweak on a name
-    // nobody chose — open the sheet immediately, blank.
-    setNamingFreshClaim(true);
-    setEditing(claimed);
+    setNamed(false);
   };
 
   const onAreaLayout = (event: LayoutChangeEvent) => {
@@ -361,10 +359,7 @@ export default function PickScreen() {
                 {/* Left behind once you lift your finger, so the claim stays anchored to its spot. */}
                 {!probe && swatch && pickPoint && (
                   <Pressable
-                    onPress={() => {
-                      setNamingFreshClaim(false);
-                      setEditing(swatch);
-                    }}
+                    onPress={() => setEditing(swatch)}
                     hitSlop={10}
                     accessibilityRole="button"
                     accessibilityLabel={`Claimed from this spot: ${swatch.name}. Tap to rename.`}
@@ -387,11 +382,7 @@ export default function PickScreen() {
           <View style={styles.panel}>
             <Pressable
               disabled={!swatch || !!probe}
-              onPress={() => {
-                if (!swatch) return;
-                setNamingFreshClaim(false);
-                setEditing(swatch);
-              }}
+              onPress={() => swatch && setEditing(swatch)}
               style={styles.readout}>
               {live ? (
                 <>
@@ -404,14 +395,27 @@ export default function PickScreen() {
                   </View>
                 </>
               ) : swatch ? (
-                <>
-                  <View style={[styles.readoutDot, { backgroundColor: swatch.hex }]} />
-                  <View style={styles.flex}>
-                    <Text style={styles.readoutHex}>{swatch.hex}</Text>
-                    <Text style={styles.readoutName}>{swatch.name} · tap to rename</Text>
-                  </View>
-                  <Ionicons name="pencil" size={16} color={T.textFaint} />
-                </>
+                named ? (
+                  <>
+                    <View style={[styles.readoutDot, { backgroundColor: swatch.hex }]} />
+                    <View style={styles.flex}>
+                      <Text style={styles.readoutHex}>{swatch.hex}</Text>
+                      <Text style={styles.readoutName}>{swatch.name} · tap to rename</Text>
+                    </View>
+                    <Ionicons name="pencil" size={16} color={T.textFaint} />
+                  </>
+                ) : (
+                  <>
+                    <View style={[styles.readoutDot, { backgroundColor: swatch.hex }]} />
+                    <Text style={[styles.readoutHex, styles.flex]}>{swatch.hex}</Text>
+                    <View style={[styles.nameCta, { backgroundColor: swatch.hex }]}>
+                      <Ionicons name="pricetag" size={13} color={readableOn(hexToRgb(swatch.hex))} />
+                      <Text style={[styles.nameCtaText, { color: readableOn(hexToRgb(swatch.hex)) }]}>
+                        Name this color
+                      </Text>
+                    </View>
+                  </>
+                )
               ) : (
                 <Text style={styles.readoutHint}>
                   Press and drag on the photo, then lift to claim its color.
@@ -454,12 +458,12 @@ export default function PickScreen() {
 
       <SwatchEditor
         swatch={editing}
-        startBlank={namingFreshClaim}
-        onClose={() => {
-          setEditing(null);
-          setNamingFreshClaim(false);
+        startBlank={!named}
+        onClose={() => setEditing(null)}
+        onSave={(name) => {
+          setSwatch((s) => (s && s.id === editing?.id ? { ...s, name } : s));
+          setNamed(true);
         }}
-        onSave={(name) => setSwatch((s) => (s && s.id === editing?.id ? { ...s, name } : s))}
         onDelete={() => {
           setSwatch((s) => (s && s.id === editing?.id ? null : s));
           setPickPoint(null);
@@ -582,6 +586,16 @@ const styles = StyleSheet.create({
   readoutHex: { color: T.text, fontSize: 18, fontWeight: '800', fontVariant: ['tabular-nums'] },
   readoutName: { color: T.textFaint, fontSize: 12, marginTop: 1 },
   readoutHint: { color: T.textFaint, fontSize: 13, lineHeight: 18, flex: 1 },
+
+  nameCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    height: 36,
+    borderRadius: radius.md,
+  },
+  nameCtaText: { fontSize: 14, fontWeight: '800' },
 
   caption: {
     marginHorizontal: 16,
