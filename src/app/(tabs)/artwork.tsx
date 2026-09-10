@@ -1,22 +1,19 @@
-import { useMemo } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PostCard } from '@/components/PostCard';
+import { ArtworkFeedCard } from '@/components/ArtworkFeedCard';
 import { useStore } from '@/lib/store';
 import { FAB_CLEARANCE, T } from '@/lib/theme';
 
-export default function ColorsFeedScreen() {
-  const { posts } = useStore();
+export default function ArtworkFeedScreen() {
+  const { artworkFeed } = useStore();
   const insets = useSafeAreaInsets();
-
-  const sorted = useMemo(() => [...posts].sort((a, b) => b.createdAt - a.createdAt), [posts]);
 
   return (
     <FlatList
-      data={sorted}
-      keyExtractor={(post) => post.id}
-      renderItem={({ item }) => <PostCard post={item} />}
+      data={artworkFeed}
+      keyExtractor={(artwork) => artwork.id}
+      renderItem={({ item }) => <ArtworkFeedCard artwork={item} />}
       style={styles.list}
       contentContainerStyle={[
         styles.content,
@@ -24,15 +21,15 @@ export default function ColorsFeedScreen() {
       ]}
       ListHeaderComponent={
         <View style={styles.header}>
-          <Text style={styles.title}>Colors</Text>
-          <Text style={styles.subtitle}>Colors claimed from photos by everyone</Text>
+          <Text style={styles.title}>Artwork</Text>
+          <Text style={styles.subtitle}>Pieces shared by everyone, tagged with colors</Text>
         </View>
       }
       ListEmptyComponent={
         <View style={styles.empty}>
-          <Text style={styles.emptyTitle}>No colors yet</Text>
+          <Text style={styles.emptyTitle}>No artwork yet</Text>
           <Text style={styles.emptyBody}>
-            Tap the button in the corner to claim a color from a photo.
+            Tap the button in the corner to share a piece and tag it with colors.
           </Text>
         </View>
       }
