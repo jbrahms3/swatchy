@@ -85,6 +85,30 @@ export type WeeklyQueue = {
   queued: QueuedPalette[];
 };
 
+export type WeeklyLeaderboardEntry = {
+  userId: string;
+  userName: string;
+  diffR: number;
+  diffG: number;
+  diffB: number;
+  /** diffR + diffG + diffB — 0 is a perfect match, lower ranks higher. */
+  score: number;
+};
+
+export type WeeklyLeaderboardSlot = {
+  slot: number;
+  hex: string;
+  /** Closest match first, capped at 50 by the server. */
+  entries: WeeklyLeaderboardEntry[];
+};
+
+/** Another user's public profile — just their name and what they've posted. */
+export type PublicProfile = {
+  id: string;
+  name: string;
+  posts: Post[];
+};
+
 export type ArtworkColor = {
   name: string;
   hex: string;
@@ -180,6 +204,10 @@ export type Store = {
     pickPoint?: { u: number; v: number };
     pickedHex: string;
   }): Promise<void>;
+  /** Per-slot rankings for the live week, closest match first, up to 50 each. */
+  loadWeeklyLeaderboard(): Promise<WeeklyLeaderboardSlot[]>;
+  /** Someone else's public profile — their name and posts, not their saved colors. */
+  loadUserProfile(userId: string): Promise<PublicProfile>;
   /* Curator-only (profile.isAdmin) — the server rejects these for anyone else. */
   loadWeeklyQueue(): Promise<WeeklyQueue>;
   queuePalette(colors: string[]): Promise<void>;
@@ -391,6 +419,19 @@ export function useStoreState(): Store {
     [api]
   );
 
+  const loadWeeklyLeaderboard = useCallback(
+    () => api.get<WeeklyLeaderboardSlot[]>('/weekly/leaderboard'),
+    [api]
+  );
+
+  const loadUserProfile = useCallback(
+    async (userId: string) => {
+      const data = await api.get<PublicProfile>(`/users/${userId}`);
+      return { ...data, posts: data.posts.map((p) => withAbsolutePhoto(p, api)) };
+    },
+    [api]
+  );
+
   const loadWeeklyQueue = useCallback(() => api.get<WeeklyQueue>('/weekly/queue'), [api]);
 
   const queuePalette = useCallback(
@@ -481,6 +522,8 @@ export function useStoreState(): Store {
     loadWeekly,
     previewWeeklyPalette,
     submitWeekly,
+    loadWeeklyLeaderboard,
+    loadUserProfile,
     loadWeeklyQueue,
     queuePalette,
     removeQueuedPalette,

@@ -77,17 +77,28 @@ export default function WeeklyScreen() {
               : "This week's colors, the same for everyone. Find something in the real world for each one."}
           </Text>
 
-          <Pressable
-            onPress={generatePreview}
-            disabled={previewLoading}
-            accessibilityRole="button"
-            accessibilityLabel="Generate a preview palette"
-            style={({ pressed }) => [styles.previewBtn, { opacity: pressed || previewLoading ? 0.6 : 1 }]}>
-            <Ionicons name="shuffle-outline" size={14} color={T.textDim} />
-            <Text style={styles.previewBtnText}>
-              {previewLoading ? 'Generating…' : preview ? 'Generate another' : 'See how the generator works'}
-            </Text>
-          </Pressable>
+          <View style={styles.headerLinks}>
+            <Pressable
+              onPress={() => router.push('/weekly-leaderboard')}
+              accessibilityRole="button"
+              accessibilityLabel="See the leaderboard"
+              style={({ pressed }) => [styles.previewBtn, { opacity: pressed ? 0.6 : 1 }]}>
+              <Ionicons name="trophy-outline" size={14} color={T.textDim} />
+              <Text style={styles.previewBtnText}>Leaderboard</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={generatePreview}
+              disabled={previewLoading}
+              accessibilityRole="button"
+              accessibilityLabel="Generate a preview palette"
+              style={({ pressed }) => [styles.previewBtn, { opacity: pressed || previewLoading ? 0.6 : 1 }]}>
+              <Ionicons name="shuffle-outline" size={14} color={T.textDim} />
+              <Text style={styles.previewBtnText}>
+                {previewLoading ? 'Generating…' : preview ? 'Generate another' : 'See how the generator works'}
+              </Text>
+            </Pressable>
+          </View>
 
           {preview && (
             <>
@@ -171,7 +182,8 @@ const styles = StyleSheet.create({
   title: { color: T.text, fontSize: 32, fontWeight: '800', letterSpacing: -0.5 },
   subtitle: { color: T.textFaint, fontSize: 14, marginTop: 4, lineHeight: 20 },
 
-  previewBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14, alignSelf: 'flex-start' },
+  headerLinks: { flexDirection: 'row', gap: 20, marginTop: 14 },
+  previewBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start' },
   previewBtnText: { color: T.textDim, fontSize: 13, fontWeight: '600' },
   previewNote: { color: T.textFaint, fontSize: 11, marginTop: 10, lineHeight: 15 },
   previewRow: { flexDirection: 'row', gap: 8, marginTop: 10 },

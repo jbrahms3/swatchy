@@ -485,6 +485,46 @@ app.patch(
   })
 );
 
+// Public counterpart to /me — just enough to render another user's profile
+// screen: their name and the posts they've shared to the home feed. Saved
+// colors stay private (the whole point of "saved" vs "posted"), so they're
+// deliberately left out here.
+app.get(
+  '/users/:id',
+  requireAuth(),
+  asyncRoute(async (req, res) => {
+    const viewer = await ensureUser(getAuth(req).userId);
+    const target = await pool.query('select id, name from users where id = $1', [req.params.id]);
+    if (!target.rows[0]) return res.status(404).json({ error: 'user not found' });
+
+    const [posts, counts] = await Promise.all([
+      pool.query(
+        `select
+           p.id, p.author_id, u.name as author_name, p.photo_key, p.photo_aspect,
+           p.pick_u, p.pick_v, p.swatch_name, p.swatch_hex, p.caption, p.created_at,
+           coalesce(l.like_count, 0) as like_count,
+           exists(select 1 from likes where post_id = p.id and user_id = $1) as liked_by_me
+         from posts p
+         join users u on u.id = p.author_id
+         left join (
+           select post_id, count(*) as like_count from likes group by post_id
+         ) l on l.post_id = p.id
+        where p.author_id = $2
+        order by p.created_at desc
+        limit 200`,
+        [viewer.id, req.params.id]
+      ),
+      artworkCountsByHex(),
+    ]);
+
+    res.json({
+      id: target.rows[0].id,
+      name: target.rows[0].name,
+      posts: posts.rows.map((row) => postRow(row, viewer.id, counts)),
+    });
+  })
+);
+
 app.post(
   '/swatches',
   requireAuth(),
@@ -759,6 +799,54 @@ app.get(
       palette: palette.map((hex, slot) => ({ slot, hex })),
       entries: result.rows.map(weeklyEntryRow),
     });
+  })
+);
+
+// Per-slot rankings for the live week, closest match first, capped at 50 —
+// enough to be interesting without the response growing without bound as
+// entries pile up over the week.
+app.get(
+  '/weekly/leaderboard',
+  requireAuth(),
+  asyncRoute(async (req, res) => {
+    const weekKey = weekKeyFor(new Date());
+    const palette = await paletteForWeek(weekKey);
+
+    const result = await pool.query(
+      `select we.slot_index, we.user_id, u.name as user_name, we.score,
+              we.diff_r, we.diff_g, we.diff_b
+         from weekly_entries we
+         join users u on u.id = we.user_id
+        where we.week_key = $1
+        order by we.slot_index, we.score asc, we.created_at asc`,
+      [weekKey]
+    );
+
+    // Grouped and capped in JS rather than a window function — this is a
+    // once-a-week dataset, not one that needs SQL-level pagination.
+    const bySlot = new Map();
+    for (const row of result.rows) {
+      const entries = bySlot.get(row.slot_index) ?? [];
+      if (entries.length < 50) {
+        entries.push({
+          userId: row.user_id,
+          userName: row.user_name,
+          score: row.score,
+          diffR: row.diff_r,
+          diffG: row.diff_g,
+          diffB: row.diff_b,
+        });
+      }
+      bySlot.set(row.slot_index, entries);
+    }
+
+    res.json(
+      palette.map((hex, slot) => ({
+        slot,
+        hex,
+        entries: bySlot.get(slot) ?? [],
+      }))
+    );
   })
 );
 
