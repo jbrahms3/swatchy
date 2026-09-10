@@ -29,8 +29,15 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="index"
           options={{
-            title: 'Home',
+            title: 'Colors',
             tabBarIcon: ({ color, size }) => <Ionicons name="grid" size={size} color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="artwork"
+          options={{
+            title: 'Artwork',
+            tabBarIcon: ({ color, size }) => <Ionicons name="brush" size={size} color={color} />,
           }}
         />
         <Tabs.Screen
