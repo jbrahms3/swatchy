@@ -67,8 +67,8 @@ export function ColorDetailSheet({ post, onClose, embedded }: Props) {
 const styles = StyleSheet.create({
   // Only used when embedded: fills whatever screen this is dropped into,
   // above its content, the way the Modal case would fill the window.
-  embeddedRoot: { ...StyleSheet.absoluteFillObject, zIndex: 10, elevation: 10 },
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)' },
+  embeddedRoot: { ...StyleSheet.absoluteFill, zIndex: 10, elevation: 10 },
+  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.6)' },
   sheetWrap: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
     maxHeight: '86%',
