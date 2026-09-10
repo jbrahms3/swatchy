@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
-import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useRef, useState } from 'react';
 import {
@@ -135,20 +134,6 @@ export default function WeeklyCaptureScreen() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const choosePhoto = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Photo access needed', 'Enable it for ColorClaim in Settings to photograph a match.');
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
-    if (result.canceled || !result.assets?.length) return;
-
-    const asset = result.assets[0];
-    await handleNewPhoto(asset.uri, asset.width, asset.height);
   };
 
   const openCamera = async () => {
@@ -296,11 +281,11 @@ export default function WeeklyCaptureScreen() {
 
         {photo ? (
           <Pressable
-            onPress={choosePhoto}
+            onPress={openCamera}
             hitSlop={12}
             accessibilityRole="button"
-            accessibilityLabel="Change photo">
-            <Ionicons name="images-outline" size={22} color={T.textDim} />
+            accessibilityLabel="Retake photo">
+            <Ionicons name="camera-outline" size={22} color={T.textDim} />
           </Pressable>
         ) : (
           <View style={{ width: 26 }} />
@@ -322,7 +307,6 @@ export default function WeeklyCaptureScreen() {
 
           <View style={styles.chooserActions}>
             <Button label="Take a photo" onPress={openCamera} />
-            <Button label="Choose from library" onPress={choosePhoto} variant="ghost" />
           </View>
         </View>
       ) : (
