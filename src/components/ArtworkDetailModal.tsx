@@ -192,7 +192,7 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 13, fontWeight: '700' },
 
   loading: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 10,
     elevation: 10,
     backgroundColor: 'rgba(0,0,0,0.4)',

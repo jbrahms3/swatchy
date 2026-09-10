@@ -72,8 +72,8 @@ export function ColorInfoModal({ color, onClose }: Props) {
 const styles = StyleSheet.create({
   // Absolute, not fixed to the window: this sits inside ArtworkDetailModal's
   // own Modal, on top of its ScrollView, and needs to fully cover it.
-  root: { ...StyleSheet.absoluteFillObject, zIndex: 10, elevation: 10 },
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)' },
+  root: { ...StyleSheet.absoluteFill, zIndex: 10, elevation: 10 },
+  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.6)' },
   sheetWrap: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
     maxHeight: '86%',
