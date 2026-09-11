@@ -7,6 +7,8 @@
  */
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const crypto = require('node:crypto');
 const path = require('node:path');
@@ -35,13 +37,188 @@ const S3_BUCKET = process.env.S3_BUCKET;
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 8 * 1024 * 1024 }, // photos are pre-downscaled client-side; 8MB is generous headroom
+  limits: {
+    fileSize: 8 * 1024 * 1024, // photos are pre-downscaled client-side; 8MB is generous headroom
+    files: 1,
+    // Nothing here posts more than a handful of small text fields alongside
+    // the photo; the default caps are far looser than anything legitimate.
+    fields: 20,
+    fieldSize: 64 * 1024,
+  },
 });
 
-app.use(cors());
-app.use(express.json());
+/* ------------------------------------------------------------------ *
+ * Uploaded image handling
+ *
+ * A multipart part's Content-Type is just a header the client wrote, so it
+ * can say anything — text/html included. Since /posts/:id/photo and
+ * friends are public and redirect to the bucket, storing that header
+ * verbatim would let anyone park an HTML page (or worse) behind a photo
+ * URL on our own infrastructure. What gets stored is decided from the
+ * bytes instead, and the presigned read pins the type on the way back out.
+ * ------------------------------------------------------------------ */
+
+const IMAGE_SIGNATURES = [
+  { type: 'image/jpeg', matches: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+  {
+    type: 'image/png',
+    matches: (b) => b.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')),
+  },
+  { type: 'image/gif', matches: (b) => /^GIF8[79]a$/.test(b.subarray(0, 6).toString('latin1')) },
+  {
+    type: 'image/webp',
+    matches: (b) =>
+      b.subarray(0, 4).toString('latin1') === 'RIFF' &&
+      b.subarray(8, 12).toString('latin1') === 'WEBP',
+  },
+  {
+    // HEIC/HEIF — an ISO-BMFF file, so 'ftyp' at offset 4 then a brand.
+    // iOS hands these back from the photo library in some configurations.
+    type: 'image/heic',
+    matches: (b) =>
+      b.subarray(4, 8).toString('latin1') === 'ftyp' &&
+      /^(heic|heix|hevc|heim|heis|hevm|hevs|mif1|msf1)$/.test(b.subarray(8, 12).toString('latin1')),
+  },
+];
+
+const EXT_FOR_IMAGE_TYPE = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'image/heic': 'heic',
+};
+
+const IMAGE_TYPE_FOR_EXT = Object.fromEntries(
+  Object.entries(EXT_FOR_IMAGE_TYPE).map(([type, ext]) => [ext, type])
+);
+
+/** The real type of an uploaded buffer, or null if it isn't an image we recognize. */
+function sniffImageType(buffer) {
+  if (!buffer || buffer.length < 12) return null;
+  return IMAGE_SIGNATURES.find((sig) => sig.matches(buffer))?.type ?? null;
+}
+
+/**
+ * Validates an upload and returns { type, ext } for storing it, or null if
+ * it isn't an image. Callers answer 400 on null.
+ */
+function imageUpload(file) {
+  const type = sniffImageType(file?.buffer);
+  return type ? { type, ext: EXT_FOR_IMAGE_TYPE[type] } : null;
+}
+
+/** 6h — long enough to cut repeat hits, short enough to rotate. */
+const PHOTO_URL_TTL_SECONDS = 6 * 60 * 60;
+
+/**
+ * 302s to a short-lived presigned URL for a stored photo. The response type
+ * is pinned from the key's own extension rather than left to whatever's
+ * recorded on the object, so anything written before uploads were
+ * byte-checked still can't come back as something a browser would run.
+ */
+async function redirectToPhoto(res, photoKey) {
+  const ext = path.extname(photoKey).slice(1).toLowerCase();
+  const url = await getSignedUrl(
+    s3,
+    new GetObjectCommand({
+      Bucket: S3_BUCKET,
+      Key: photoKey,
+      ResponseContentType: IMAGE_TYPE_FOR_EXT[ext] ?? 'application/octet-stream',
+      ResponseContentDisposition: 'inline',
+    }),
+    { expiresIn: PHOTO_URL_TTL_SECONDS }
+  );
+  // Cache the redirect itself so repeat loads skip this server entirely
+  // until the presigned URL is due to expire.
+  res.set('Cache-Control', `public, max-age=${PHOTO_URL_TTL_SECONDS}`);
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.redirect(302, url);
+}
+
+// Railway terminates TLS one hop in front of this process, so the client IP
+// lives in X-Forwarded-For. Without this every request looks like it came
+// from the proxy and the whole userbase shares one rate-limit bucket.
+app.set('trust proxy', 1);
+
+// CSP is off: landing.html and guess.html are self-contained pages with
+// inline script and style, and a default policy would break both. The rest
+// of helmet's headers (nosniff, frameguard, HSTS, referrer policy) still
+// apply. CORP is explicitly cross-origin because photo redirects are meant
+// to be loadable from wherever the app is served.
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    crossOriginEmbedderPolicy: false,
+  })
+);
+
+/**
+ * Set ALLOWED_ORIGINS (comma-separated) to restrict browser access to known
+ * front-ends. Left unset it stays open, which is the historical behavior:
+ * auth here is a bearer token rather than a cookie, so an open policy
+ * doesn't hand another site the ability to act as a signed-in user — it
+ * only leaves the public endpoints reachable from anywhere, which is what
+ * the rate limits below are for. The native app sends no Origin at all and
+ * is unaffected either way.
+ */
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(
+  cors(
+    ALLOWED_ORIGINS.length
+      ? { origin: (origin, cb) => cb(null, !origin || ALLOWED_ORIGINS.includes(origin)) }
+      : undefined
+  )
+);
+app.use(express.json({ limit: '64kb' }));
 
 const asyncRoute = (fn) => (req, res, next) => fn(req, res, next).catch(next);
+
+/** Shared options — count everything, and report via the standard headers. */
+const limiterBase = { standardHeaders: 'draft-7', legacyHeaders: false };
+
+/** The three public photo redirects, which are metered separately below. */
+const PHOTO_PATH = /^\/(?:posts\/[^/]+\/photo|artworks\/[^/]+\/photo|weekly-photo\/[^/]+)$/;
+
+/** Broad ceiling for authenticated app traffic: generous, but not unbounded. */
+const apiLimiter = rateLimit({
+  ...limiterBase,
+  windowMs: 60 * 1000,
+  limit: 300,
+  // Photo redirects are the one thing clients fire in bulk — a cold feed
+  // load is one request per post, which would eat this whole budget and
+  // leave the feed full of broken images. They're also the cheapest route
+  // here (one indexed lookup, one signature, no bytes proxied) and the
+  // answer is cacheable for hours, so they get their own ceiling instead.
+  skip: (req) => PHOTO_PATH.test(req.path),
+});
+
+const photoLimiter = rateLimit({ ...limiterBase, windowMs: 60 * 1000, limit: 1200 });
+
+/** Uploads are the expensive path — bucket writes plus an 8MB body each. */
+const uploadLimiter = rateLimit({
+  ...limiterBase,
+  windowMs: 60 * 1000,
+  limit: 20,
+  message: { error: 'too many uploads, slow down' },
+});
+
+/**
+ * Writes anyone on the internet can make without an account (the waitlist
+ * form and the guessing game). Tight, since there's no identity behind them
+ * and each one is a row in the database.
+ */
+const publicWriteLimiter = rateLimit({
+  ...limiterBase,
+  windowMs: 60 * 60 * 1000,
+  limit: 20,
+  message: { error: 'too many requests, try again later' },
+});
 
 // Ahead of clerkMiddleware so uptime probes work even if Clerk is misconfigured.
 app.get('/health', (req, res) => res.json({ ok: true }));
@@ -53,6 +230,7 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'landing.html')));
 
 app.post(
   '/waitlist',
+  publicWriteLimiter,
   asyncRoute(async (req, res) => {
     const email = String(req.body.email ?? '').trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
@@ -66,6 +244,9 @@ app.post(
   })
 );
 
+// Everything past here is app traffic, and every one of these routes costs a
+// database round trip at minimum — so they sit under a shared ceiling.
+app.use(apiLimiter);
 app.use(clerkMiddleware());
 
 /**
@@ -648,6 +829,7 @@ app.get(
 app.post(
   '/posts',
   requireAuth(),
+  uploadLimiter,
   upload.single('photo'),
   asyncRoute(async (req, res) => {
     const user = await ensureUser(getAuth(req).userId);
@@ -666,14 +848,16 @@ app.post(
     let photoKey = null;
 
     if (req.file) {
-      const ext = req.file.mimetype === 'image/png' ? 'png' : 'jpg';
-      photoKey = `photos/${id}.${ext}`;
+      const image = imageUpload(req.file);
+      if (!image) return res.status(400).json({ error: 'that file is not an image' });
+
+      photoKey = `photos/${id}.${image.ext}`;
       await s3.send(
         new PutObjectCommand({
           Bucket: S3_BUCKET,
           Key: photoKey,
           Body: req.file.buffer,
-          ContentType: req.file.mimetype,
+          ContentType: image.type,
         })
       );
     }
@@ -734,24 +918,15 @@ app.delete(
 // Deliberately not behind requireAuth(): image tags can't easily attach an
 // Authorization header, and post ids are unguessable UUIDs only ever handed
 // out via the (auth-gated) feed — same privacy bar as an unlisted link.
-const PHOTO_URL_TTL_SECONDS = 6 * 60 * 60; // 6h — long enough to cut repeat hits, short enough to rotate
-
 app.get(
   '/posts/:id/photo',
+  photoLimiter,
   asyncRoute(async (req, res) => {
     const result = await pool.query('select photo_key from posts where id = $1', [req.params.id]);
     const photoKey = result.rows[0]?.photo_key;
     if (!photoKey) return res.status(404).end();
 
-    const url = await getSignedUrl(
-      s3,
-      new GetObjectCommand({ Bucket: S3_BUCKET, Key: photoKey }),
-      { expiresIn: PHOTO_URL_TTL_SECONDS }
-    );
-    // Cache the redirect itself so repeat loads skip this server entirely
-    // until the presigned URL is due to expire.
-    res.set('Cache-Control', `public, max-age=${PHOTO_URL_TTL_SECONDS}`);
-    res.redirect(302, url);
+    await redirectToPhoto(res, photoKey);
   })
 );
 
@@ -954,6 +1129,7 @@ app.delete(
 app.post(
   '/weekly/:slot',
   requireAuth(),
+  uploadLimiter,
   upload.single('photo'),
   asyncRoute(async (req, res) => {
     const user = await ensureUser(getAuth(req).userId);
@@ -969,6 +1145,9 @@ app.post(
       return res.status(400).json({ error: 'a valid pickedHex is required' });
     }
     if (!req.file) return res.status(400).json({ error: 'a photo is required' });
+
+    const image = imageUpload(req.file);
+    if (!image) return res.status(400).json({ error: 'that file is not an image' });
 
     const photoAspect = req.body.photoAspect ? Number(req.body.photoAspect) : null;
     const pickU = req.body.pickU !== undefined ? Number(req.body.pickU) : null;
@@ -991,15 +1170,14 @@ app.post(
     );
 
     const id = existing.rows[0]?.id ?? crypto.randomUUID();
-    const ext = req.file.mimetype === 'image/png' ? 'png' : 'jpg';
-    const photoKey = `weekly/${weekKey}/${user.id}/${slot}-${id}.${ext}`;
+    const photoKey = `weekly/${weekKey}/${user.id}/${slot}-${id}.${image.ext}`;
 
     await s3.send(
       new PutObjectCommand({
         Bucket: S3_BUCKET,
         Key: photoKey,
         Body: req.file.buffer,
-        ContentType: req.file.mimetype,
+        ContentType: image.type,
       })
     );
 
@@ -1033,6 +1211,7 @@ app.post(
 // Same unauthenticated-but-unguessable-id pattern as /posts/:id/photo.
 app.get(
   '/weekly-photo/:id',
+  photoLimiter,
   asyncRoute(async (req, res) => {
     const result = await pool.query('select photo_key from weekly_entries where id = $1', [
       req.params.id,
@@ -1040,13 +1219,7 @@ app.get(
     const photoKey = result.rows[0]?.photo_key;
     if (!photoKey) return res.status(404).end();
 
-    const url = await getSignedUrl(
-      s3,
-      new GetObjectCommand({ Bucket: S3_BUCKET, Key: photoKey }),
-      { expiresIn: PHOTO_URL_TTL_SECONDS }
-    );
-    res.set('Cache-Control', `public, max-age=${PHOTO_URL_TTL_SECONDS}`);
-    res.redirect(302, url);
+    await redirectToPhoto(res, photoKey);
   })
 );
 
@@ -1144,6 +1317,7 @@ app.get(
 app.post(
   '/artworks',
   requireAuth(),
+  uploadLimiter,
   upload.single('photo'),
   asyncRoute(async (req, res) => {
     const user = await ensureUser(getAuth(req).userId);
@@ -1172,15 +1346,17 @@ app.post(
       return res.status(400).json({ error: 'each color needs a name and a valid hex' });
     }
 
+    const image = imageUpload(req.file);
+    if (!image) return res.status(400).json({ error: 'that file is not an image' });
+
     const id = crypto.randomUUID();
-    const ext = req.file.mimetype === 'image/png' ? 'png' : 'jpg';
-    const photoKey = `artworks/${id}.${ext}`;
+    const photoKey = `artworks/${id}.${image.ext}`;
     await s3.send(
       new PutObjectCommand({
         Bucket: S3_BUCKET,
         Key: photoKey,
         Body: req.file.buffer,
-        ContentType: req.file.mimetype,
+        ContentType: image.type,
       })
     );
 
@@ -1220,6 +1396,7 @@ app.delete(
 // Same unauthenticated-but-unguessable-id pattern as /posts/:id/photo.
 app.get(
   '/artworks/:id/photo',
+  photoLimiter,
   asyncRoute(async (req, res) => {
     const result = await pool.query('select photo_key from artworks where id = $1', [
       req.params.id,
@@ -1227,13 +1404,7 @@ app.get(
     const photoKey = result.rows[0]?.photo_key;
     if (!photoKey) return res.status(404).end();
 
-    const url = await getSignedUrl(
-      s3,
-      new GetObjectCommand({ Bucket: S3_BUCKET, Key: photoKey }),
-      { expiresIn: PHOTO_URL_TTL_SECONDS }
-    );
-    res.set('Cache-Control', `public, max-age=${PHOTO_URL_TTL_SECONDS}`);
-    res.redirect(302, url);
+    await redirectToPhoto(res, photoKey);
   })
 );
 
@@ -1335,6 +1506,7 @@ app.get(
 
 app.post(
   '/guess/submit',
+  publicWriteLimiter,
   asyncRoute(async (req, res) => {
     const name = String(req.body.name ?? '').trim().slice(0, MAX_GUESS_NAME_LEN);
     const hex = normalizeHex(req.body.hex);
@@ -1461,7 +1633,20 @@ app.delete(
 app.use((err, req, res, next) => {
   console.error(err);
   if (res.headersSent) return next(err);
-  res.status(err.status || 500).json({ error: err.message || 'Internal error' });
+
+  // A malformed id in a path param reaches the driver as invalid-uuid
+  // syntax. That's a bad request, not a server fault — and answering it
+  // with the driver's own message would echo back internals.
+  if (err.code === '22P02') return res.status(400).json({ error: 'malformed id' });
+  if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'that photo is too large' });
+  if (err.code?.startsWith?.('LIMIT_')) return res.status(400).json({ error: 'malformed upload' });
+
+  // Only messages we set deliberately (via err.status) are safe to repeat
+  // back; anything else is an unplanned failure whose text could carry
+  // query fragments, table names or connection details. It's already been
+  // logged in full above.
+  const status = Number.isInteger(err.status) && err.status >= 400 && err.status < 600 ? err.status : 500;
+  res.status(status).json({ error: status === 500 ? 'Internal error' : err.message });
 });
 
 app.listen(port, () => {

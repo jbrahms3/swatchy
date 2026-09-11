@@ -254,10 +254,13 @@
   var STORAGE_ADMIN_KEY = 'guess_admin_key';
 
   function $(id) { return document.getElementById(id); }
+  // textContent alone escapes < > &, but leaves quotes — and half the uses
+  // below drop the result inside an HTML attribute, where a bare quote is
+  // enough to break out. Handle both contexts.
   function esc(s) {
-    var d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
   }
   function normalizeHex(input) {
     var raw = String(input || '').trim().replace(/^#/, '');
@@ -304,8 +307,8 @@
       '<input class="name-input" id="name-input" maxlength="40" placeholder="What should we call you?" value="' + esc(playerName) + '"></div>' +
       '<div class="field"><label>Your guess</label>' +
       '<div class="picker-row">' +
-      '<input type="color" id="color-input" value="' + (myGuessHex || '#C97A3D') + '">' +
-      '<input class="text-input hex-input" id="hex-input" value="' + (myGuessHex || '#C97A3D') + '" maxlength="7">' +
+      '<input type="color" id="color-input" value="' + esc(myGuessHex || '#C97A3D') + '">' +
+      '<input class="text-input hex-input" id="hex-input" value="' + esc(myGuessHex || '#C97A3D') + '" maxlength="7">' +
       '</div></div>' +
       '<div class="field"><button class="btn" id="submit-btn">' + (myGuessHex ? 'Update guess' : 'Submit guess') + '</button></div>' +
       '<p class="status" id="submit-status"></p>';
