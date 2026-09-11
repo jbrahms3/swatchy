@@ -79,6 +79,21 @@ const IMAGE_SIGNATURES = [
       b.subarray(4, 8).toString('latin1') === 'ftyp' &&
       /^(heic|heix|hevc|heim|heis|hevm|hevs|mif1|msf1)$/.test(b.subarray(8, 12).toString('latin1')),
   },
+  {
+    // AVIF — same ISO-BMFF container as above, different brand. Increasingly
+    // what an Android gallery hands back.
+    type: 'image/avif',
+    matches: (b) =>
+      b.subarray(4, 8).toString('latin1') === 'ftyp' &&
+      /^avi[fs]$/.test(b.subarray(8, 12).toString('latin1')),
+  },
+  { type: 'image/bmp', matches: (b) => b[0] === 0x42 && b[1] === 0x4d },
+  {
+    type: 'image/tiff',
+    matches: (b) =>
+      b.subarray(0, 4).equals(Buffer.from('49492a00', 'hex')) ||
+      b.subarray(0, 4).equals(Buffer.from('4d4d002a', 'hex')),
+  },
 ];
 
 const EXT_FOR_IMAGE_TYPE = {
@@ -87,6 +102,9 @@ const EXT_FOR_IMAGE_TYPE = {
   'image/gif': 'gif',
   'image/webp': 'webp',
   'image/heic': 'heic',
+  'image/avif': 'avif',
+  'image/bmp': 'bmp',
+  'image/tiff': 'tiff',
 };
 
 const IMAGE_TYPE_FOR_EXT = Object.fromEntries(
