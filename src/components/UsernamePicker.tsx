@@ -102,7 +102,7 @@ export function UsernamePicker() {
 
           <Button label="Continue" onPress={submit} disabled={!!problem} busy={busy} />
 
-          <Text style={styles.footnote}>You can change it later from your profile.</Text>
+          <Text style={styles.footnote}>You can change it later from your profile, once a week.</Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

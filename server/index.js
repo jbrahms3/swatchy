@@ -343,6 +343,65 @@ function isUsernameTaken(err) {
   return err?.code === '23505' && err.constraint === 'users_name_lower_idx';
 }
 
+/**
+ * Once a username is set, it can change at most this often. Choosing one
+ * during setup doesn't count toward it, and neither does saving the same
+ * name again — see username_changed_at in schema.sql.
+ */
+const USERNAME_CHANGE_COOLDOWN_DAYS = 7;
+const USERNAME_CHANGE_COOLDOWN_MS = USERNAME_CHANGE_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+
+/** When this account may next change its username, or null if it can now. */
+function usernameChangeableAt(user) {
+  if (!user.username_set || !user.username_changed_at) return null;
+  const at = new Date(user.username_changed_at).getTime() + USERNAME_CHANGE_COOLDOWN_MS;
+  return at > Date.now() ? new Date(at) : null;
+}
+
+/**
+ * "in 5 days", "in 3 hours" — relative rather than a date, because the server
+ * doesn't know the viewer's timezone. The app shows the exact local time
+ * itself from usernameChangeableAt; this is only for the refusal message.
+ */
+function untilPhrase(date) {
+  const hours = (date.getTime() - Date.now()) / (60 * 60 * 1000);
+  if (hours < 1) return 'in under an hour';
+  if (hours < 24) {
+    const whole = Math.ceil(hours);
+    return whole === 1 ? 'in an hour' : `in ${whole} hours`;
+  }
+  const days = Math.round(hours / 24);
+  return days === 1 ? 'in a day' : `in ${days} days`;
+}
+
+/**
+ * Saves the profile, applying the username cooldown in the same statement so
+ * two renames racing each other can't both get through: the row lock makes the
+ * second wait, and Postgres then re-checks the WHERE against the row the first
+ * one just wrote. SET and WHERE see the row as it was before this update, so
+ * `username_set` and `name` below mean "before". No row back means the
+ * cooldown refused it.
+ *
+ *   $1 name  $2 username_set  $3 onboarded  $4 user id  $5 cooldown days
+ */
+const SAVE_PROFILE_SQL = `
+  update users
+     set name = $1,
+         username_set = $2,
+         onboarded = $3,
+         username_changed_at = case
+           when username_set and lower(name) <> lower($1) then now()
+           else username_changed_at
+         end
+   where id = $4
+     and (
+       not username_set
+       or lower(name) = lower($1)
+       or username_changed_at is null
+       or username_changed_at <= now() - make_interval(days => $5)
+     )
+  returning username_set, username_changed_at`;
+
 /** Ensures a `users` row exists for the authenticated Clerk identity. */
 async function ensureUser(clerkId) {
   const existing = await pool.query('select * from users where clerk_id = $1', [clerkId]);
@@ -723,6 +782,7 @@ app.get(
       id: user.id,
       name: user.name,
       usernameSet: user.username_set,
+      usernameChangeableAt: usernameChangeableAt(user)?.toISOString() ?? null,
       onboarded: user.onboarded,
       isAdmin: admin,
       saved: saved.rows.map((row) => swatchRow(row, counts)),
@@ -752,16 +812,42 @@ app.patch(
     }
     const onboarded = req.body.onboarded === undefined ? user.onboarded : !!req.body.onboarded;
 
+    let saved;
     try {
-      await pool.query(
-        'update users set name = $1, username_set = $2, onboarded = $3 where id = $4',
-        [name, usernameSet, onboarded, user.id]
-      );
+      saved = await pool.query(SAVE_PROFILE_SQL, [
+        name,
+        usernameSet,
+        onboarded,
+        user.id,
+        USERNAME_CHANGE_COOLDOWN_DAYS,
+      ]);
     } catch (err) {
       if (isUsernameTaken(err)) return res.status(409).json({ error: 'that username is taken' });
       throw err;
     }
-    res.json({ id: user.id, name, usernameSet, onboarded });
+
+    if (!saved.rows[0]) {
+      // Read it fresh: if this lost a race to another rename, the row fetched
+      // at the top of the request predates the change that's now blocking it.
+      const current = await pool.query(
+        'select username_set, username_changed_at from users where id = $1',
+        [user.id]
+      );
+      const at = usernameChangeableAt(current.rows[0] ?? user);
+      return res.status(429).json({
+        error: `you can only change your username once a week — try again ${at ? untilPhrase(at) : 'soon'}`,
+        usernameChangeableAt: at?.toISOString() ?? null,
+      });
+    }
+
+    const after = saved.rows[0];
+    res.json({
+      id: user.id,
+      name,
+      usernameSet: after.username_set,
+      usernameChangeableAt: usernameChangeableAt(after)?.toISOString() ?? null,
+      onboarded,
+    });
   })
 );
 

@@ -49,6 +49,28 @@ export default function ProfileScreen() {
   }, [loadArtworks]);
 
   const chipSize = (width - GUTTER * 2 - 12 * (COLUMNS - 1)) / COLUMNS;
+
+  // Usernames change at most once a week. Say so up front rather than letting
+  // someone type a new name only for the server to turn it down.
+  const lockedUntil =
+    profile.usernameChangeableAt && new Date(profile.usernameChangeableAt).getTime() > Date.now()
+      ? new Date(profile.usernameChangeableAt)
+      : null;
+
+  const startEditingName = () => {
+    if (lockedUntil) {
+      Alert.alert(
+        'You can’t change it yet',
+        `Usernames can change once a week. You can pick a new one on ${lockedUntil.toLocaleString(
+          undefined,
+          { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
+        )}.`
+      );
+      return;
+    }
+    setDraftName(profile.name);
+    setEditingName(true);
+  };
   const accent = profile.saved[0]?.hex ?? T.surfaceHi;
 
   const commitName = () => {
@@ -107,15 +129,16 @@ export default function ProfileScreen() {
             </View>
           ) : (
             <Pressable
-              onPress={() => {
-                setDraftName(profile.name);
-                setEditingName(true);
-              }}
+              onPress={startEditingName}
               accessibilityRole="button"
-              accessibilityLabel="Change username"
+              accessibilityLabel={lockedUntil ? 'Username, locked for now' : 'Change username'}
               style={styles.nameRow}>
               <Text style={styles.name}>@{profile.name}</Text>
-              <Ionicons name="pencil" size={15} color={T.textFaint} />
+              <Ionicons
+                name={lockedUntil ? 'lock-closed' : 'pencil'}
+                size={15}
+                color={T.textFaint}
+              />
             </Pressable>
           )}
 
