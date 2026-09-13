@@ -7,7 +7,7 @@
 
 import { useAuth } from '@clerk/clerk-expo';
 import { Platform } from 'react-native';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { makeApi, type Api } from './api';
 
@@ -230,7 +230,18 @@ export type Store = {
 
 export function useStoreState(): Store {
   const { isSignedIn, getToken, userId } = useAuth();
-  const api = useMemo(() => makeApi(() => getToken()), [getToken]);
+
+  // @clerk/clerk-expo's useAuth wraps getToken in a fresh arrow function on
+  // every render — no useCallback — so its identity is never stable. Keying
+  // `api` on it rebuilt `api` every render, which rebuilt every loader below,
+  // which re-fired every screen effect keyed on a loader; each of those set
+  // state and re-rendered, forever. In practice that was /weekly + /artworks
+  // at ~1,700 requests a minute from one phone, until the API's rate limiter
+  // started refusing them. Reading the latest getToken through a ref builds
+  // `api` exactly once while still always using the current token.
+  const getTokenRef = useRef(getToken);
+  getTokenRef.current = getToken;
+  const api = useMemo(() => makeApi(() => getTokenRef.current()), []);
 
   const [ready, setReady] = useState(false);
   const [profile, setProfile] = useState<Profile>({
