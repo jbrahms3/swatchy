@@ -249,3 +249,9 @@ begin
 end $$;
 
 create unique index if not exists users_name_lower_idx on users (lower(name));
+
+-- When the username last actually changed, for the once-a-week limit (see
+-- USERNAME_CHANGE_COOLDOWN_DAYS in index.js). Null until the first real
+-- change: choosing a username during setup doesn't count, so a typo made while
+-- signing up can still be fixed straight away.
+alter table users add column if not exists username_changed_at timestamptz;

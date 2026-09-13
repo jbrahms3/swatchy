@@ -41,6 +41,8 @@ export type Profile = {
   name: string;
   /** False until the person has chosen a username — new accounts start with a generated one. */
   usernameSet: boolean;
+  /** ISO time the username may next change (it's limited to once a week), or null if it can now. */
+  usernameChangeableAt: string | null;
   onboarded: boolean;
   /** Curates the weekly palette queue. Server-decided — the UI only hides things. */
   isAdmin: boolean;
@@ -253,6 +255,7 @@ export function useStoreState(): Store {
     // True, like onboarded: if /me fails to load, the app shouldn't strand
     // someone on a username screen it can't save from.
     usernameSet: true,
+    usernameChangeableAt: null,
     onboarded: true,
     isAdmin: false,
     saved: [],
@@ -299,10 +302,18 @@ export function useStoreState(): Store {
   // username is reserved", a format problem) so screens can show it as-is.
   const renameProfile = useCallback(
     async (name: string) => {
-      const updated = await api.patch<{ id: string; name: string; usernameSet: boolean }>('/me', {
-        name,
-      });
-      setProfile((p) => ({ ...p, name: updated.name, usernameSet: updated.usernameSet }));
+      const updated = await api.patch<{
+        id: string;
+        name: string;
+        usernameSet: boolean;
+        usernameChangeableAt: string | null;
+      }>('/me', { name });
+      setProfile((p) => ({
+        ...p,
+        name: updated.name,
+        usernameSet: updated.usernameSet,
+        usernameChangeableAt: updated.usernameChangeableAt,
+      }));
       setPosts((all) => all.map((p) => (p.mine ? { ...p, authorName: updated.name } : p)));
     },
     [api]
