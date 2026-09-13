@@ -174,3 +174,78 @@ create table if not exists color_guess_entries (
 
 create unique index if not exists color_guess_entries_round_name_idx
   on color_guess_entries (round_id, lower(player_name));
+
+-- Usernames. users.name is each account's public username: lowercase letters,
+-- digits, '.' and '_', 3–20 characters, and unique ignoring case. Format rules
+-- beyond the character set (no leading, trailing or doubled periods; reserved
+-- words) live in usernameFormatProblem() in index.js.
+--
+-- It used to be a free-text display name, defaulted on first sign-in from the
+-- Clerk first name or — since sign-up only collects an email — the part of the
+-- email address before the '@'. That put fragments of people's email
+-- addresses on every post, the leaderboard and their public profile.
+--
+-- So the first time this runs, each existing name is kept only if it already
+-- works as a username and can't have come from the email address; anything
+-- else gets a generated name. Oldest account first, so the earliest claim to
+-- a name wins a tie. Everyone's username_set stays false, so the app asks each
+-- person to confirm or change what they ended up with.
+--
+-- Guarded on username_set not existing yet: preDeployCommand applies this
+-- whole file on every deploy, and this must only ever happen once.
+do $$
+declare
+  account record;
+  wanted text;
+  candidate text;
+  claimed text[] := '{}';
+  -- Same list as RESERVED_USERNAMES in index.js, which is the live one; this
+  -- copy only matters for this single pass.
+  reserved constant text[] := array[
+    'admin', 'administrator', 'api', 'help', 'mod', 'moderator', 'null', 'official',
+    'root', 'security', 'settings', 'staff', 'support', 'system', 'team', 'undefined',
+    'you'
+  ];
+begin
+  if not exists (
+    select 1 from information_schema.columns
+     where table_schema = current_schema()
+       and table_name = 'users'
+       and column_name = 'username_set'
+  ) then
+    alter table users add column username_set boolean not null default false;
+
+    for account in select id, name, email from users order by created_at, id loop
+      wanted := lower(account.name);
+
+      if wanted ~ '^[a-z0-9._]{3,20}$'
+         and left(wanted, 1) <> '.'
+         and right(wanted, 1) <> '.'
+         and position('..' in wanted) = 0
+         and not (wanted = any(reserved))
+         and position('swatchy' in wanted) = 0
+         -- Never keep a name that came from the email address. With no email
+         -- on file there's no way to tell, so those are replaced too.
+         and account.email is not null
+         and wanted <> lower(split_part(account.email, '@', 1))
+         and not (wanted = any(claimed))
+      then
+        candidate := wanted;
+      else
+        loop
+          candidate := 'swatcher' || (100000 + floor(random() * 900000))::int;
+          exit when not (candidate = any(claimed))
+                and not exists (select 1 from users where lower(name) = candidate);
+        end loop;
+      end if;
+
+      claimed := array_append(claimed, candidate);
+      update users set name = candidate where id = account.id;
+    end loop;
+
+    alter table users
+      add constraint users_name_format check (name ~ '^[a-z0-9._]{3,20}$');
+  end if;
+end $$;
+
+create unique index if not exists users_name_lower_idx on users (lower(name));

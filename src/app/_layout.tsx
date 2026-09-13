@@ -8,6 +8,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthScreen } from '@/components/AuthScreen';
 import { Onboarding } from '@/components/Onboarding';
+import { UsernamePicker } from '@/components/UsernamePicker';
 import { clerkTokenCache } from '@/lib/clerkTokenCache';
 import { StoreProvider, useStoreState } from '@/lib/store';
 import { T } from '@/lib/theme';
@@ -62,6 +63,21 @@ function AuthenticatedApp() {
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: T.bg }}>
         <ActivityIndicator color={T.text} />
       </View>
+    );
+  }
+
+  // Before onboarding: a new account's generated username shouldn't be what
+  // they're first seen as, and existing accounts whose names were reset (see
+  // schema.sql) land here once without seeing onboarding again.
+  //
+  // Strictly `=== false`, not falsy: only an explicit "not chosen yet" from the
+  // server should hold someone here. A response without the field at all (an
+  // older API mid-deploy) would otherwise trap them on a screen it can't save.
+  if (store.profile.usernameSet === false) {
+    return (
+      <StoreProvider value={store}>
+        <UsernamePicker />
+      </StoreProvider>
     );
   }
 
