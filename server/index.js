@@ -295,6 +295,54 @@ function primaryEmail(clerkUser) {
   return primary?.emailAddress?.trim().toLowerCase() ?? null;
 }
 
+/* ------------------------------------------------------------------ *
+ * Usernames
+ *
+ * users.name is the account's public username — unique ignoring case. The
+ * database enforces the character set, length and uniqueness (schema.sql);
+ * the finer rules below it doesn't. src/lib/username.ts mirrors the format
+ * rules for instant feedback while typing, but this is the one that decides.
+ * ------------------------------------------------------------------ */
+
+const USERNAME_MIN = 3;
+const USERNAME_MAX = 20;
+
+/**
+ * Names nobody but an admin may take, so no one can pass themselves off as
+ * the app or its staff. Anything containing "swatchy" is covered separately.
+ */
+const RESERVED_USERNAMES = new Set([
+  'admin', 'administrator', 'api', 'help', 'mod', 'moderator', 'null', 'official',
+  'root', 'security', 'settings', 'staff', 'support', 'system', 'team', 'undefined',
+  'you',
+]);
+
+/** A problem with the username's shape, or null if it's well-formed. */
+function usernameFormatProblem(name) {
+  if (name.length < USERNAME_MIN || name.length > USERNAME_MAX) {
+    return `usernames are ${USERNAME_MIN}–${USERNAME_MAX} characters`;
+  }
+  if (!/^[a-z0-9._]+$/.test(name)) {
+    return 'usernames can only use letters, numbers, periods and underscores';
+  }
+  if (name.startsWith('.') || name.endsWith('.')) return "usernames can't start or end with a period";
+  if (name.includes('..')) return "usernames can't have two periods in a row";
+  return null;
+}
+
+function isReservedUsername(name) {
+  return RESERVED_USERNAMES.has(name) || name.includes('swatchy');
+}
+
+/** What a new account is called until its owner picks something. */
+function generatedUsername() {
+  return `swatcher${crypto.randomInt(100000, 1000000)}`;
+}
+
+function isUsernameTaken(err) {
+  return err?.code === '23505' && err.constraint === 'users_name_lower_idx';
+}
+
 /** Ensures a `users` row exists for the authenticated Clerk identity. */
 async function ensureUser(clerkId) {
   const existing = await pool.query('select * from users where clerk_id = $1', [clerkId]);
@@ -302,21 +350,34 @@ async function ensureUser(clerkId) {
 
   const clerkUser = await clerkClient.users.getUser(clerkId);
   const email = primaryEmail(clerkUser);
-  const name = clerkUser.firstName || clerkUser.username || email?.split('@')[0] || 'You';
 
+  // Always a generated username, never one derived from the person's name or
+  // email — that used to be the default, and put fragments of email addresses
+  // on every public post. username_set starts false, so the app asks them to
+  // choose one before anything else.
+  //
   // Two concurrent first-ever requests for the same brand-new user (e.g.
   // /me and /posts firing in parallel from the client's initial load) can
   // both miss the SELECT above and race to insert the same clerk_id.
   // ON CONFLICT DO UPDATE (a harmless no-op) instead of DO NOTHING means
   // RETURNING still hands back a row to the loser too, instead of erroring.
-  const inserted = await pool.query(
-    `insert into users (clerk_id, name, email, onboarded)
-     values ($1, $2, $3, false)
-     on conflict (clerk_id) do update set clerk_id = excluded.clerk_id
-     returning *`,
-    [clerkId, name, email]
-  );
-  return inserted.rows[0];
+  // That arbiter only covers clerk_id, so a generated username that happens
+  // to be taken still raises — and just gets another roll.
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      const inserted = await pool.query(
+        `insert into users (clerk_id, name, email, onboarded)
+         values ($1, $2, $3, false)
+         on conflict (clerk_id) do update set clerk_id = excluded.clerk_id
+         returning *`,
+        [clerkId, generatedUsername(), email]
+      );
+      return inserted.rows[0];
+    } catch (err) {
+      if (!isUsernameTaken(err)) throw err;
+    }
+  }
+  throw new Error('could not generate an unused username');
 }
 
 /* ------------------------------------------------------------------ *
@@ -661,6 +722,7 @@ app.get(
     res.json({
       id: user.id,
       name: user.name,
+      usernameSet: user.username_set,
       onboarded: user.onboarded,
       isAdmin: admin,
       saved: saved.rows.map((row) => swatchRow(row, counts)),
@@ -673,14 +735,33 @@ app.patch(
   requireAuth(),
   asyncRoute(async (req, res) => {
     const user = await ensureUser(getAuth(req).userId);
-    const name = String(req.body.name ?? '').trim().slice(0, 24) || user.name;
+
+    let name = user.name;
+    let usernameSet = user.username_set;
+    if (req.body.name !== undefined) {
+      // Case-insensitive by storing lowercase — "Aidan" and "aidan" are the
+      // same username, so there's only ever one way to write it.
+      name = String(req.body.name).trim().toLowerCase();
+      const problem = usernameFormatProblem(name);
+      if (problem) return res.status(400).json({ error: problem });
+      if (isReservedUsername(name) && !(await isAdmin(user))) {
+        return res.status(400).json({ error: 'that username is reserved' });
+      }
+      // Saving counts as choosing, even if it's the generated one kept as-is.
+      usernameSet = true;
+    }
     const onboarded = req.body.onboarded === undefined ? user.onboarded : !!req.body.onboarded;
-    await pool.query('update users set name = $1, onboarded = $2 where id = $3', [
-      name,
-      onboarded,
-      user.id,
-    ]);
-    res.json({ id: user.id, name, onboarded });
+
+    try {
+      await pool.query(
+        'update users set name = $1, username_set = $2, onboarded = $3 where id = $4',
+        [name, usernameSet, onboarded, user.id]
+      );
+    } catch (err) {
+      if (isUsernameTaken(err)) return res.status(409).json({ error: 'that username is taken' });
+      throw err;
+    }
+    res.json({ id: user.id, name, usernameSet, onboarded });
   })
 );
 

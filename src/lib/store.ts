@@ -37,7 +37,10 @@ export type Post = {
 
 export type Profile = {
   id: string;
+  /** The account's unique, public username. */
   name: string;
+  /** False until the person has chosen a username — new accounts start with a generated one. */
+  usernameSet: boolean;
   onboarded: boolean;
   /** Curates the weekly palette queue. Server-decided — the UI only hides things. */
   isAdmin: boolean;
@@ -247,6 +250,9 @@ export function useStoreState(): Store {
   const [profile, setProfile] = useState<Profile>({
     id: '',
     name: 'You',
+    // True, like onboarded: if /me fails to load, the app shouldn't strand
+    // someone on a username screen it can't save from.
+    usernameSet: true,
     onboarded: true,
     isAdmin: false,
     saved: [],
@@ -289,11 +295,14 @@ export function useStoreState(): Store {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSignedIn, userId]);
 
+  // Rejects with the server's own message ("that username is taken", "that
+  // username is reserved", a format problem) so screens can show it as-is.
   const renameProfile = useCallback(
     async (name: string) => {
-      const trimmed = name.trim() || 'You';
-      const updated = await api.patch<{ id: string; name: string }>('/me', { name: trimmed });
-      setProfile((p) => ({ ...p, name: updated.name }));
+      const updated = await api.patch<{ id: string; name: string; usernameSet: boolean }>('/me', {
+        name,
+      });
+      setProfile((p) => ({ ...p, name: updated.name, usernameSet: updated.usernameSet }));
       setPosts((all) => all.map((p) => (p.mine ? { ...p, authorName: updated.name } : p)));
     },
     [api]

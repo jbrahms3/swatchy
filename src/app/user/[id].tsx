@@ -64,7 +64,7 @@ export default function UserProfileScreen() {
                 {profile!.name.slice(0, 1).toUpperCase()}
               </Text>
             </View>
-            <Text style={styles.name}>{profile!.name}</Text>
+            <Text style={styles.name}>@{profile!.name}</Text>
             <Text style={styles.stats}>{profile!.posts.length} posted</Text>
           </View>
 

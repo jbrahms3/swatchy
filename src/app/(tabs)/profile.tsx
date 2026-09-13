@@ -21,6 +21,12 @@ import { SwatchEditor } from '@/components/SwatchEditor';
 import { hexToRgb, readableOn } from '@/lib/color';
 import { useStore, type Swatch } from '@/lib/store';
 import { FAB_CLEARANCE, T, radius } from '@/lib/theme';
+import {
+  USERNAME_MAX,
+  normalizeUsername,
+  usernameErrorMessage,
+  usernameProblem,
+} from '@/lib/username';
 
 const GUTTER = 16;
 const COLUMNS = 3;
@@ -47,12 +53,17 @@ export default function ProfileScreen() {
 
   const commitName = () => {
     setEditingName(false);
-    if (draftName.trim() && draftName.trim() !== profile.name) {
-      renameProfile(draftName).catch((err) => {
-        console.error('[profile] Failed to rename', err);
-        Alert.alert('Could not rename', 'Something went wrong. Try again.');
-      });
+    const next = normalizeUsername(draftName);
+    if (!next || next === profile.name) return;
+
+    const problem = usernameProblem(next);
+    if (problem) {
+      Alert.alert('Can’t use that username', problem);
+      return;
     }
+    renameProfile(next).catch((err) => {
+      Alert.alert('Can’t use that username', usernameErrorMessage(err));
+    });
   };
 
   const confirmSignOut = () => {
@@ -76,17 +87,24 @@ export default function ProfileScreen() {
           </View>
 
           {editingName ? (
-            <TextInput
-              value={draftName}
-              onChangeText={setDraftName}
-              onBlur={commitName}
-              onSubmitEditing={commitName}
-              style={styles.nameInput}
-              autoFocus
-              selectTextOnFocus
-              maxLength={24}
-              returnKeyType="done"
-            />
+            <View style={styles.nameRow}>
+              <Text style={styles.name}>@</Text>
+              <TextInput
+                value={draftName}
+                onChangeText={(text) => setDraftName(normalizeUsername(text))}
+                onBlur={commitName}
+                onSubmitEditing={commitName}
+                style={styles.nameInput}
+                autoFocus
+                selectTextOnFocus
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="off"
+                maxLength={USERNAME_MAX}
+                returnKeyType="done"
+                accessibilityLabel="Username"
+              />
+            </View>
           ) : (
             <Pressable
               onPress={() => {
@@ -94,9 +112,9 @@ export default function ProfileScreen() {
                 setEditingName(true);
               }}
               accessibilityRole="button"
-              accessibilityLabel="Edit display name"
+              accessibilityLabel="Change username"
               style={styles.nameRow}>
-              <Text style={styles.name}>{profile.name}</Text>
+              <Text style={styles.name}>@{profile.name}</Text>
               <Ionicons name="pencil" size={15} color={T.textFaint} />
             </Pressable>
           )}
@@ -285,10 +303,9 @@ const styles = StyleSheet.create({
     color: T.text,
     fontSize: 24,
     fontWeight: '800',
-    textAlign: 'center',
     borderBottomWidth: 1,
     borderBottomColor: T.border,
-    minWidth: 180,
+    minWidth: 160,
     paddingVertical: 2,
   },
   stats: { color: T.textFaint, fontSize: 13, marginTop: 6 },
