@@ -51,7 +51,7 @@ export function CreateMenu({ visible, onClose }: Props) {
       if (!permission.granted) {
         Alert.alert(
           source === 'camera' ? 'Camera access needed' : 'Photo access needed',
-          `Enable it for ColorClaim in Settings to ${FLOW_COPY[flow].permissionSubject}.`
+          `Enable it for Swatchy in Settings to ${FLOW_COPY[flow].permissionSubject}.`
         );
         return;
       }

@@ -2,6 +2,7 @@ import { useSignIn, useSignUp, useSSO } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
+import { Image } from 'expo-image';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,6 +19,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/Button';
 import { T, radius } from '@/lib/theme';
+
+const LOGO = require('@/assets/images/logo.png');
 
 // Required once, wherever an OAuth flow might be initiated: lets the
 // browser tab Clerk opens for Google's consent screen hand control back to
@@ -165,11 +168,9 @@ export function AuthScreen() {
     setError(null);
     setBusy(true);
     try {
-      const redirectUrl = Linking.createURL('/sso-callback');
-      console.log('[google sso] redirectUrl', redirectUrl);
       const { createdSessionId, setActive } = await startSSOFlow({
         strategy: 'oauth_google',
-        redirectUrl,
+        redirectUrl: Linking.createURL('/sso-callback'),
       });
       if (createdSessionId && setActive) {
         await setActive({ session: createdSessionId });
@@ -210,13 +211,7 @@ export function AuthScreen() {
       <ScrollView
         contentContainerStyle={[styles.content, { paddingTop: insets.top + 40 }]}
         keyboardShouldPersistTaps="handled">
-        <View style={styles.art}>
-          {['#E2574C', '#E8B04B', '#3F8F6F', '#2F6DB0'].map((hex) => (
-            <View key={hex} style={[styles.swatch, { backgroundColor: hex }]} />
-          ))}
-        </View>
-
-        <Text style={styles.title}>Swatchy</Text>
+        <Image source={LOGO} style={styles.logo} accessibilityLabel="Swatchy" />
         <Text style={styles.subtitle}>
           {mode === 'verify'
             ? `Enter the code we sent to ${email.trim()}`
@@ -401,8 +396,8 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: T.bg },
   content: { flexGrow: 1, paddingHorizontal: 28, paddingBottom: 40 },
 
-  art: { flexDirection: 'row', gap: 8, marginBottom: 24 },
-  swatch: { width: 40, height: 58, borderRadius: radius.sm },
+  // The logo carries the wordmark, so it stands in for a separate title.
+  logo: { width: 96, height: 96, borderRadius: 22, marginBottom: 12 },
 
   title: { color: T.text, fontSize: 30, fontWeight: '800', letterSpacing: -0.5 },
   subtitle: { color: T.textFaint, fontSize: 14, marginTop: 8, lineHeight: 20, maxWidth: 300 },

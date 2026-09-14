@@ -140,7 +140,7 @@ export default function WeeklyCaptureScreen() {
     if (!cameraPermission?.granted) {
       const result = await requestCameraPermission();
       if (!result.granted) {
-        Alert.alert('Camera access needed', 'Enable it for ColorClaim in Settings to photograph a match.');
+        Alert.alert('Camera access needed', 'Enable it for Swatchy in Settings to photograph a match.');
         return;
       }
     }
