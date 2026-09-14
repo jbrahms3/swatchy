@@ -1,3 +1,4 @@
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -5,10 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { T, radius } from '@/lib/theme';
 
-// The app's own signature swatches (already the de facto logomark on the
-// auth screen and the claim-a-photo chooser) plus two more from the same
-// family, so this card reads as a fuller version of the same identity.
-const LOGO_COLORS = ['#E2574C', '#E8B04B', '#3F8F6F', '#2F6DB0', '#8A5FBF', '#C97A3D'];
+const LOGO = require('@/assets/images/logo.png');
 
 /**
  * A clean, chrome-free brand card — app name, logo, tagline — meant to be
@@ -34,13 +32,7 @@ export default function ShareScreen() {
       />
 
       <View style={styles.center}>
-        <View style={styles.logo}>
-          {LOGO_COLORS.map((hex) => (
-            <View key={hex} style={[styles.bar, { backgroundColor: hex }]} />
-          ))}
-        </View>
-
-        <Text style={styles.name}>Swatchy</Text>
+        <Image source={LOGO} style={styles.logo} accessibilityLabel="Swatchy" />
         <Text style={styles.tagline}>Every color tells a story.{'\n'}Snap it, name it, claim it.</Text>
         {showWaitlist && (
           <Pressable
@@ -69,21 +61,7 @@ const styles = StyleSheet.create({
 
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
 
-  logo: { flexDirection: 'row', gap: 10, marginBottom: 40 },
-  bar: {
-    width: 30,
-    height: 92,
-    borderRadius: radius.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.14)',
-  },
-
-  name: {
-    color: T.text,
-    fontSize: 46,
-    fontWeight: '800',
-    letterSpacing: -1.2,
-  },
+  logo: { width: 220, height: 220, borderRadius: 50, marginBottom: 36 },
   tagline: {
     color: T.textDim,
     fontSize: 17,

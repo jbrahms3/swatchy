@@ -1,3 +1,4 @@
+import { Image } from 'expo-image';
 import { useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -20,6 +21,8 @@ import {
   usernameErrorMessage,
   usernameProblem,
 } from '@/lib/username';
+
+const LOGO = require('@/assets/images/logo.png');
 
 /**
  * Asks someone to choose their username before anything else. Every account
@@ -61,11 +64,7 @@ export function UsernamePicker() {
       <ScrollView
         contentContainerStyle={[styles.content, { paddingTop: insets.top + 40 }]}
         keyboardShouldPersistTaps="handled">
-        <View style={styles.art}>
-          {['#E2574C', '#E8B04B', '#3F8F6F', '#2F6DB0'].map((hex) => (
-            <View key={hex} style={[styles.swatch, { backgroundColor: hex }]} />
-          ))}
-        </View>
+        <Image source={LOGO} style={styles.logo} accessibilityLabel="Swatchy" />
 
         <Text style={styles.title}>Pick a username</Text>
         <Text style={styles.subtitle}>
@@ -113,8 +112,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: T.bg },
   content: { flexGrow: 1, paddingHorizontal: 28, paddingBottom: 40 },
 
-  art: { flexDirection: 'row', gap: 8, marginBottom: 24 },
-  swatch: { width: 40, height: 58, borderRadius: radius.sm },
+  logo: { width: 64, height: 64, borderRadius: 15, marginBottom: 24 },
 
   title: { color: T.text, fontSize: 30, fontWeight: '800', letterSpacing: -0.5 },
   subtitle: { color: T.textFaint, fontSize: 14, marginTop: 8, lineHeight: 20, maxWidth: 300 },

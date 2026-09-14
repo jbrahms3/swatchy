@@ -84,7 +84,7 @@ export default function ArtworkUploadScreen() {
     if (!permission.granted) {
       Alert.alert(
         source === 'camera' ? 'Camera access needed' : 'Photo access needed',
-        'Enable it for ColorClaim in Settings to upload artwork.'
+        'Enable it for Swatchy in Settings to upload artwork.'
       );
       return;
     }

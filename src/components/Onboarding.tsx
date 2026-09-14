@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -8,6 +9,7 @@ import { useStore } from '@/lib/store';
 import { T, radius } from '@/lib/theme';
 
 const LOGO_COLORS = ['#E2574C', '#E8B04B', '#3F8F6F', '#2F6DB0', '#8A5FBF', '#C97A3D'];
+const LOGO = require('@/assets/images/logo.png');
 
 type Slide = { title: string; body: string; art: ReactNode };
 
@@ -21,18 +23,8 @@ function Glow({ color }: { color: string }) {
   );
 }
 
-// Uneven heights read as an equalizer/palette strip rather than a row of
-// identical bricks — the same colors carry more energy for it.
-const WELCOME_HEIGHTS = [44, 70, 52, 78, 40, 60];
-
 function WelcomeArt() {
-  return (
-    <View style={styles.logoBars}>
-      {LOGO_COLORS.map((hex, i) => (
-        <View key={hex} style={[styles.logoBar, { backgroundColor: hex, height: WELCOME_HEIGHTS[i] }]} />
-      ))}
-    </View>
-  );
+  return <Image source={LOGO} style={styles.logo} accessibilityLabel="Swatchy" />;
 }
 
 function ClaimArt() {
@@ -126,8 +118,9 @@ function CollectionArt() {
 
 const SLIDES: Slide[] = [
   {
-    title: 'Swatchy',
-    body: 'Every color tells a story. Snap it, name it, claim it.',
+    // The logo above already spells out the name.
+    title: 'Every color tells a story',
+    body: 'Snap it, name it, claim it.',
     art: <WelcomeArt />,
   },
   {
@@ -260,13 +253,7 @@ const styles = StyleSheet.create({
   },
 
   // Welcome
-  logoBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 7 },
-  logoBar: {
-    width: 20,
-    borderRadius: radius.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.14)',
-  },
+  logo: { width: 150, height: 150, borderRadius: 34 },
 
   // Claim
   artPhoto: {

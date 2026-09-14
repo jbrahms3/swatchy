@@ -246,6 +246,9 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 // nothing here needs a session.
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'landing.html')));
 
+// Logo files for those pages: favicon, home-screen icon and link-preview image.
+app.use('/brand', express.static(path.join(__dirname, 'brand'), { maxAge: '7d', index: false }));
+
 app.post(
   '/waitlist',
   publicWriteLimiter,

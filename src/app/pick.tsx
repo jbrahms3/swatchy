@@ -152,7 +152,7 @@ export default function PickScreen() {
     if (!permission.granted) {
       Alert.alert(
         source === 'camera' ? 'Camera access needed' : 'Photo access needed',
-        'Enable it for ColorClaim in Settings to pick colors from a photo.'
+        'Enable it for Swatchy in Settings to pick colors from a photo.'
       );
       return;
     }
